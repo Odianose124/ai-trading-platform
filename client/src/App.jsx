@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -24,6 +24,7 @@ import {
 } from "react-router-dom";
 import api from "./services/api";
 import TradeHistoryPage from "./TradeHistoryPage";
+import MarketsPage from "./MarketsPage";
 import "./App.css";
 
 const navigation = [
@@ -250,7 +251,7 @@ function TradingApplication() {
 
             <Route
               path="/markets"
-              element={<Markets />}
+              element={<MarketsPage />}
             />
 
             <Route
@@ -1433,13 +1434,195 @@ function TradeHistory() {
 }
 
 function SettingsPage() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [action, setAction] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadStatus(manualRefresh = false) {
+    try {
+      if (manualRefresh) {
+        setRefreshing(true);
+      }
+
+      setError("");
+      setMessage("");
+
+      const response = await api.get(
+        "/api/mt5/status",
+      );
+
+      setData(response.data);
+    } catch (requestError) {
+      setData(null);
+
+      setError(
+        requestError?.response?.data?.detail ||
+          "Unable to load MetaTrader 5 status.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  async function connectMT5() {
+    try {
+      setAction("connect");
+      setError("");
+      setMessage("");
+
+      const response = await api.post(
+        "/api/mt5/connect",
+      );
+
+      setData(response.data);
+
+      setMessage(
+        "MetaTrader 5 connected successfully.",
+      );
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.detail ||
+          "Unable to connect to MetaTrader 5.",
+      );
+    } finally {
+      setAction("");
+    }
+  }
+
+  async function disconnectMT5() {
+    try {
+      setAction("disconnect");
+      setError("");
+      setMessage("");
+
+      const response = await api.post(
+        "/api/mt5/disconnect",
+      );
+
+      setData({
+        connected: false,
+      });
+
+      setMessage(
+        response?.data?.message ||
+          "MetaTrader 5 disconnected.",
+      );
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.detail ||
+          "Unable to disconnect MetaTrader 5.",
+      );
+    } finally {
+      setAction("");
+    }
+  }
+
+  useEffect(() => {
+    loadStatus();
+
+    const interval = window.setInterval(
+      () => loadStatus(false),
+      15000,
+    );
+
+    return () =>
+      window.clearInterval(interval);
+  }, []);
+
+  const connected =
+    data?.connected === true;
+
+  const account = data?.account || {};
+  const terminal = data?.terminal || {};
+  const version = data?.version || {};
+
   return (
     <section className="page">
-      <PageHeading
-        eyebrow="Settings"
-        title="Platform settings"
-        description="Trading controls and account configuration will be connected here as their backend controls become available."
-      />
+      <div className="page-heading-row">
+        <PageHeading
+          eyebrow="Settings"
+          title="Platform settings"
+          description="Manage the MetaTrader 5 connection and view the live trading account configuration."
+        />
+
+        <button
+          className="secondary-button"
+          onClick={() => loadStatus(true)}
+          disabled={refreshing}
+        >
+          <RefreshCw
+            size={17}
+            className={
+              refreshing
+                ? "spin-animation"
+                : ""
+            }
+          />
+
+          {refreshing
+            ? "Refreshing..."
+            : "Refresh"}
+        </button>
+      </div>
+
+      {error && (
+        <ErrorBanner message={error} />
+      )}
+
+      {message && (
+        <div className="live-source-banner">
+          <span className="live-indicator" />
+
+          <div>
+            <strong>{message}</strong>
+
+            <span>
+              MetaTrader 5 connection status
+              updated successfully.
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="live-source-banner">
+        <span
+          className={`live-indicator ${
+            connected ? "" : "status-offline"
+          }`}
+        />
+
+        <div>
+          <strong>
+            MetaTrader 5
+          </strong>
+
+          <span>
+            {loading
+              ? "Checking terminal connection..."
+              : connected
+                ? "Connected to live MT5 terminal"
+                : "MT5 terminal is currently unavailable"}
+          </span>
+        </div>
+
+        <strong
+          className={
+            connected
+              ? "profit-positive"
+              : "profit-negative"
+          }
+        >
+          {loading
+            ? "Checking..."
+            : connected
+              ? "CONNECTED"
+              : "DISCONNECTED"}
+        </strong>
+      </div>
 
       <div className="settings-grid">
         <div className="settings-card">
@@ -1448,30 +1631,266 @@ function SettingsPage() {
           </div>
 
           <div>
-            <h3>Risk protection</h3>
+            <h3>Connection control</h3>
 
             <p>
-              Trading safety controls remain enforced
-              by the backend execution layer.
+              Connect or disconnect the platform
+              from the MetaTrader 5 terminal.
             </p>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                flexWrap: "wrap",
+                marginTop: "16px",
+              }}
+            >
+              <button
+                className="secondary-button"
+                onClick={connectMT5}
+                disabled={
+                  action !== "" ||
+                  connected
+                }
+              >
+                <Activity size={17} />
+
+                {action === "connect"
+                  ? "Connecting..."
+                  : connected
+                    ? "Already connected"
+                    : "Connect MT5"}
+              </button>
+
+              <button
+                className="secondary-button"
+                onClick={disconnectMT5}
+                disabled={
+                  action !== "" ||
+                  !connected
+                }
+              >
+                <PanelLeftClose size={17} />
+
+                {action === "disconnect"
+                  ? "Disconnecting..."
+                  : "Disconnect MT5"}
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="settings-card">
           <div className="settings-icon">
-            <PanelLeftClose size={20} />
+            <Bot size={20} />
           </div>
 
           <div>
-            <h3>Interface</h3>
+            <h3>AI trading safety</h3>
 
             <p>
-              The interface is optimized for mobile,
-              tablet and desktop screens.
+              The execution layer remains responsible
+              for trade validation, risk controls and
+              AI-managed execution decisions.
             </p>
           </div>
         </div>
       </div>
+
+      {connected && (
+        <>
+          <div className="section-title-row">
+            <div>
+              <span className="card-label">
+                Live account
+              </span>
+
+              <h3>
+                MetaTrader 5 account
+              </h3>
+            </div>
+          </div>
+
+          <div className="position-summary-grid">
+            <PositionSummaryCard
+              label="Balance"
+              value={formatMoney(
+                account.balance,
+              )}
+              icon={BriefcaseBusiness}
+            />
+
+            <PositionSummaryCard
+              label="Equity"
+              value={formatMoney(
+                account.equity,
+              )}
+              icon={TrendingUp}
+            />
+
+            <PositionSummaryCard
+              label="Free margin"
+              value={formatMoney(
+                account.free_margin,
+              )}
+              icon={BarChart3}
+            />
+
+            <PositionSummaryCard
+              label="Leverage"
+              value={
+                account.leverage
+                  ? `1:${account.leverage}`
+                  : "--"
+              }
+              icon={Activity}
+            />
+          </div>
+
+          <div className="analysis-panel">
+            <div className="panel-heading">
+              <BriefcaseBusiness size={20} />
+
+              <div>
+                <h3>Account information</h3>
+
+                <span>
+                  Information returned directly
+                  by the connected MT5 terminal
+                </span>
+              </div>
+            </div>
+
+            <div className="reasoning-content">
+              <ReasoningBlock
+                title="Account"
+                value={
+                  account.login
+                    ? String(account.login)
+                    : "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Account name"
+                value={
+                  account.name ||
+                  "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Server"
+                value={
+                  account.server ||
+                  "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Currency"
+                value={
+                  account.currency ||
+                  "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Trading allowed"
+                value={
+                  account.trade_allowed
+                    ? "Yes"
+                    : "No"
+                }
+              />
+
+              <ReasoningBlock
+                title="Margin"
+                value={formatMoney(
+                  account.margin,
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="analysis-panel">
+            <div className="panel-heading">
+              <Settings size={20} />
+
+              <div>
+                <h3>Terminal information</h3>
+
+                <span>
+                  Connected MetaTrader 5 environment
+                </span>
+              </div>
+            </div>
+
+            <div className="reasoning-content">
+              <ReasoningBlock
+                title="Terminal"
+                value={
+                  terminal.name ||
+                  "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Company"
+                value={
+                  terminal.company ||
+                  "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Terminal build"
+                value={
+                  version.build
+                    ? String(version.build)
+                    : "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Terminal version"
+                value={
+                  version.terminal
+                    ? String(version.terminal)
+                    : "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Release date"
+                value={
+                  version.release_date
+                    ? String(
+                        version.release_date,
+                      )
+                    : "Unavailable"
+                }
+              />
+
+              <ReasoningBlock
+                title="Terminal path"
+                value={
+                  terminal.path ||
+                  "Unavailable"
+                }
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {!loading && !connected && (
+        <EmptyState
+          title="MetaTrader 5 is not connected"
+          description="Connect the MT5 terminal to view the live account configuration and trading status."
+        />
+      )}
     </section>
   );
 }
