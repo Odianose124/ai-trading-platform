@@ -8,8 +8,10 @@ import {
   Clock3,
   Menu,
   PanelLeftClose,
+  RefreshCw,
   Settings,
   ShieldCheck,
+  TrendingDown,
   TrendingUp,
   X,
 } from "lucide-react";
@@ -328,7 +330,9 @@ function CommandCenter() {
           analysisResponse,
           mtfResponse,
         ] = await Promise.all([
-          api.get("/api/mt5/market-data/ticks"),
+          api.get(
+            "/api/mt5/market-data/ticks",
+          ),
 
           api.get(
             "/api/mt5/market-data/analysis/ai/XAUUSD/15m",
@@ -392,7 +396,8 @@ function CommandCenter() {
     };
   }, []);
 
-  const aiBias = analysis?.overall_bias || "neutral";
+  const aiBias =
+    analysis?.overall_bias || "neutral";
 
   const aiConfidence =
     analysis?.confidence ?? null;
@@ -584,7 +589,9 @@ function CommandCenter() {
 
           <ReasoningBlock
             title="Higher timeframe"
-            value={formatBias(higherTimeframeBias)}
+            value={formatBias(
+              higherTimeframeBias,
+            )}
           />
 
           <ReasoningBlock
@@ -892,9 +899,7 @@ function AIAnalysis() {
 
           <div>
             <h3>AI reasoning</h3>
-            <span>
-              XAUUSD · 15m
-            </span>
+            <span>XAUUSD · 15m</span>
           </div>
         </div>
 
@@ -1010,9 +1015,7 @@ function AIAnalysis() {
           <ReasoningBlock
             title="MTF conflicts"
             value={
-              formatList(
-                mtf?.conflicts,
-              ) ||
+              formatList(mtf?.conflicts) ||
               "No conflicts returned."
             }
           />
@@ -1067,20 +1070,360 @@ function AIAnalysis() {
   );
 }
 
+/*
+|--------------------------------------------------------------------------
+| LIVE MT5 POSITIONS
+|--------------------------------------------------------------------------
+*/
+
 function Positions() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+
+  async function loadPositions(
+    manualRefresh = false,
+  ) {
+    try {
+      if (manualRefresh) {
+        setRefreshing(true);
+      }
+
+      setError("");
+
+      const response = await api.get(
+        "/api/mt5/positions",
+      );
+
+      setData(response.data);
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.detail ||
+          "Unable to load live MT5 positions.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    loadPositions();
+
+    const interval = window.setInterval(
+      () => loadPositions(false),
+      5000,
+    );
+
+    return () =>
+      window.clearInterval(interval);
+  }, []);
+
+  const positions = Array.isArray(
+    data?.positions,
+  )
+    ? data.positions
+    : [];
+
+  const summary = data?.summary || {
+    open_trades: 0,
+    total_volume: 0,
+    floating_profit: 0,
+  };
+
   return (
     <section className="page">
-      <PageHeading
-        eyebrow="Positions"
-        title="Open positions"
-        description="Live trade positions will appear here once the connected trading account has open positions."
-      />
+      <div className="page-heading-row">
+        <PageHeading
+          eyebrow="Positions"
+          title="Live open positions"
+          description="Real-time positions currently exposed by the connected MetaTrader 5 account."
+        />
 
-      <EmptyState
-        title="No open positions"
-        description="No open MT5 positions are currently exposed to the frontend."
-      />
+        <button
+          className="secondary-button"
+          onClick={() => loadPositions(true)}
+          disabled={refreshing}
+        >
+          <RefreshCw
+            size={17}
+            className={
+              refreshing
+                ? "spin-animation"
+                : ""
+            }
+          />
+
+          {refreshing
+            ? "Refreshing..."
+            : "Refresh"}
+        </button>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      <div className="live-source-banner">
+        <span className="live-indicator" />
+
+        <div>
+          <strong>
+            Live MetaTrader 5 positions
+          </strong>
+
+          <span>
+            Auto-refreshing every 5 seconds ·
+            AI-managed positions only
+          </span>
+        </div>
+      </div>
+
+      <div className="position-summary-grid">
+        <PositionSummaryCard
+          label="Open trades"
+          value={summary.open_trades}
+          icon={BriefcaseBusiness}
+        />
+
+        <PositionSummaryCard
+          label="Total volume"
+          value={formatVolume(
+            summary.total_volume,
+          )}
+          icon={BarChart3}
+        />
+
+        <PositionSummaryCard
+          label="Floating P/L"
+          value={formatMoney(
+            summary.floating_profit,
+          )}
+          icon={
+            Number(summary.floating_profit) >= 0
+              ? TrendingUp
+              : TrendingDown
+          }
+          positive={
+            Number(summary.floating_profit) > 0
+          }
+          negative={
+            Number(summary.floating_profit) < 0
+          }
+        />
+      </div>
+
+      <div className="section-title-row">
+        <div>
+          <span className="card-label">
+            MT5 account
+          </span>
+
+          <h3>Open positions</h3>
+        </div>
+
+        {data?.magic && (
+          <span className="position-magic">
+            Magic {data.magic}
+          </span>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="positions-loading">
+          <LoadingText />
+        </div>
+      ) : positions.length === 0 ? (
+        <EmptyState
+          title="No open positions"
+          description="There are currently no AI-managed positions open on the connected MetaTrader 5 account."
+        />
+      ) : (
+        <div className="positions-list">
+          {positions.map((position) => (
+            <LivePositionCard
+              key={position.ticket}
+              position={position}
+            />
+          ))}
+        </div>
+      )}
     </section>
+  );
+}
+
+function PositionSummaryCard({
+  label,
+  value,
+  icon: Icon,
+  positive,
+  negative,
+}) {
+  return (
+    <article className="position-summary-card">
+      <div className="position-summary-icon">
+        <Icon size={19} />
+      </div>
+
+      <div>
+        <span>{label}</span>
+
+        <strong
+          className={
+            positive
+              ? "profit-positive"
+              : negative
+                ? "profit-negative"
+                : ""
+          }
+        >
+          {value}
+        </strong>
+      </div>
+    </article>
+  );
+}
+
+function LivePositionCard({
+  position,
+}) {
+  const isBuy =
+    String(position.type || "").toLowerCase() ===
+    "buy";
+
+  const profit = Number(
+    position.profit || 0,
+  );
+
+  return (
+    <article className="live-position-card">
+      <div className="position-card-top">
+        <div className="position-instrument">
+          <div
+            className={`position-side-icon ${
+              isBuy
+                ? "position-buy"
+                : "position-sell"
+            }`}
+          >
+            {isBuy ? (
+              <TrendingUp size={19} />
+            ) : (
+              <TrendingDown size={19} />
+            )}
+          </div>
+
+          <div>
+            <strong>
+              {position.symbol}
+            </strong>
+
+            <span>
+              Ticket #{position.ticket}
+            </span>
+          </div>
+        </div>
+
+        <div
+          className={`position-side-badge ${
+            isBuy
+              ? "position-buy"
+              : "position-sell"
+          }`}
+        >
+          {isBuy ? "BUY" : "SELL"}
+        </div>
+      </div>
+
+      <div className="position-details-grid">
+        <PositionDetail
+          label="Volume"
+          value={formatVolume(
+            position.volume,
+          )}
+        />
+
+        <PositionDetail
+          label="Entry"
+          value={formatNumber(
+            position.entry_price,
+          )}
+        />
+
+        <PositionDetail
+          label="Current"
+          value={formatNumber(
+            position.current_price,
+          )}
+        />
+
+        <PositionDetail
+          label="Stop Loss"
+          value={
+            Number(position.stop_loss || 0) > 0
+              ? formatNumber(
+                  position.stop_loss,
+                )
+              : "Not set"
+          }
+        />
+
+        <PositionDetail
+          label="Take Profit"
+          value={
+            Number(position.take_profit || 0) > 0
+              ? formatNumber(
+                  position.take_profit,
+                )
+              : "Not set"
+          }
+        />
+
+        <PositionDetail
+          label="Swap"
+          value={formatMoney(
+            position.swap,
+          )}
+        />
+      </div>
+
+      <div className="position-profit-row">
+        <span>Floating P/L</span>
+
+        <strong
+          className={
+            profit > 0
+              ? "profit-positive"
+              : profit < 0
+                ? "profit-negative"
+                : ""
+          }
+        >
+          {formatMoney(profit)}
+        </strong>
+      </div>
+
+      <div className="position-card-footer">
+        <span>
+          MT5 · AI managed
+        </span>
+
+        <span>
+          Magic {position.magic}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function PositionDetail({
+  label,
+  value,
+}) {
+  return (
+    <div className="position-detail">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -1369,9 +1712,7 @@ function DecisionMessage({
     mtf?.higher_timeframe_bias ||
     "neutral";
 
-  if (
-    overallBias === "neutral"
-  ) {
+  if (overallBias === "neutral") {
     return (
       "The current evidence is mixed or insufficiently aligned for a reliable directional bias."
     );
@@ -1381,51 +1722,41 @@ function DecisionMessage({
     executionBias !== overallBias &&
     executionBias !== "neutral"
   ) {
-    return (
-      `${formatBias(
-        executionBias,
-      )} short-term execution conditions are conflicting with the ${formatBias(
-        overallBias,
-      )} overall AI bias. ${decision}.`
-    );
+    return `${formatBias(
+      executionBias,
+    )} short-term execution conditions are conflicting with the ${formatBias(
+      overallBias,
+    )} overall AI bias. ${decision}.`;
   }
 
   if (
     higherBias !== overallBias &&
     higherBias !== "neutral"
   ) {
-    return (
-      `${formatBias(
-        executionBias,
-      )} execution conditions are different from the ${formatBias(
-        higherBias,
-      )} higher-timeframe context. ${decision}.`
-    );
+    return `${formatBias(
+      executionBias,
+    )} execution conditions are different from the ${formatBias(
+      higherBias,
+    )} higher-timeframe context. ${decision}.`;
   }
 
   if (confidence < 50) {
-    return (
-      `${formatBias(
-        overallBias,
-      )} evidence exists, but conviction is low at ${confidence.toFixed(
-        1,
-      )}%. ${decision}.`
-    );
+    return `${formatBias(
+      overallBias,
+    )} evidence exists, but conviction is low at ${confidence.toFixed(
+      1,
+    )}%. ${decision}.`;
   }
 
   if (confidence < 65) {
-    return (
-      `${formatBias(
-        overallBias,
-      )} evidence has an advantage, but additional confirmation is required. ${decision}.`
-    );
+    return `${formatBias(
+      overallBias,
+    )} evidence has an advantage, but additional confirmation is required. ${decision}.`;
   }
 
-  return (
-    `${formatBias(
-      overallBias,
-    )} evidence currently has the strongest weighted advantage. ${decision}.`
-  );
+  return `${formatBias(
+    overallBias,
+  )} evidence currently has the strongest weighted advantage. ${decision}.`;
 }
 
 function getDecision(
@@ -1526,6 +1857,49 @@ function formatNumber(value) {
     {
       minimumFractionDigits: 2,
       maximumFractionDigits: 5,
+    },
+  );
+}
+
+function formatMoney(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    Number.isNaN(Number(value))
+  ) {
+    return "--";
+  }
+
+  const numericValue = Number(value);
+
+  const sign =
+    numericValue > 0
+      ? "+"
+      : "";
+
+  return `${sign}$${numericValue.toLocaleString(
+    undefined,
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    },
+  )}`;
+}
+
+function formatVolume(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    Number.isNaN(Number(value))
+  ) {
+    return "--";
+  }
+
+  return Number(value).toLocaleString(
+    undefined,
+    {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
     },
   );
 }
