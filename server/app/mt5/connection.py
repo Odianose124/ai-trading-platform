@@ -16,10 +16,14 @@ class MT5Connection:
 
     def connect(self) -> dict[str, Any]:
         if self._connected:
-            return self.get_status()
+            try:
+                return self.get_status()
+            except MT5ConnectionError:
+                self._connected = False
 
         if not mt5.initialize():
             error = mt5.last_error()
+
             raise MT5ConnectionError(
                 f"MetaTrader 5 initialization failed: {error}"
             )
@@ -30,14 +34,20 @@ class MT5Connection:
 
         if terminal_info is None:
             mt5.shutdown()
+            self._connected = False
+
             raise MT5ConnectionError(
-                f"Unable to read MT5 terminal information: {mt5.last_error()}"
+                f"Unable to read MT5 terminal information: "
+                f"{mt5.last_error()}"
             )
 
         if account_info is None:
             mt5.shutdown()
+            self._connected = False
+
             raise MT5ConnectionError(
-                f"Unable to read MT5 account information: {mt5.last_error()}"
+                f"Unable to read MT5 account information: "
+                f"{mt5.last_error()}"
             )
 
         self._connected = True
@@ -62,7 +72,51 @@ class MT5Connection:
             logger.info("Disconnected from MetaTrader 5")
 
     def is_connected(self) -> bool:
-        return self._connected
+        """
+        Verify the real MT5 connection instead of relying only
+        on the process-local _connected flag.
+
+        This allows the API to recover after Uvicorn reloads,
+        worker restarts, or an MT5 terminal reconnection.
+        """
+
+        if self._connected:
+            terminal_info = mt5.terminal_info()
+            account_info = mt5.account_info()
+
+            if terminal_info is not None and account_info is not None:
+                return True
+
+            self._connected = False
+
+        try:
+            if not mt5.initialize():
+                return False
+
+            terminal_info = mt5.terminal_info()
+            account_info = mt5.account_info()
+
+            if terminal_info is None or account_info is None:
+                return False
+
+            self._connected = True
+
+            logger.info(
+                "MT5 connection recovered | account=%s | server=%s",
+                account_info.login,
+                account_info.server,
+            )
+
+            return True
+
+        except Exception as exc:
+            logger.warning(
+                "Unable to verify/recover MT5 connection: %s",
+                exc,
+            )
+
+            self._connected = False
+            return False
 
     def get_status(
         self,
@@ -81,6 +135,8 @@ class MT5Connection:
         version = version or mt5.version()
 
         if terminal_info is None or account_info is None:
+            self._connected = False
+
             raise MT5ConnectionError(
                 f"Unable to read MT5 status: {mt5.last_error()}"
             )
