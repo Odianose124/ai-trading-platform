@@ -75,6 +75,7 @@ function TradingApplication() {
     async function checkServices() {
       try {
         await api.get("/");
+
         if (mounted) {
           setBackendStatus("online");
         }
@@ -85,9 +86,16 @@ function TradingApplication() {
       }
 
       try {
-        await api.get("/api/mt5/status");
+        const response = await api.get("/api/mt5/status");
+
         if (mounted) {
-          setMt5Status("connected");
+          const connected =
+            response?.data?.connected === true ||
+            response?.data?.status === "connected";
+
+          setMt5Status(
+            connected ? "connected" : "disconnected",
+          );
         }
       } catch {
         if (mounted) {
@@ -98,7 +106,10 @@ function TradingApplication() {
 
     checkServices();
 
-    const interval = window.setInterval(checkServices, 15000);
+    const interval = window.setInterval(
+      checkServices,
+      15000,
+    );
 
     return () => {
       mounted = false;
@@ -108,7 +119,11 @@ function TradingApplication() {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
+      <aside
+        className={`sidebar ${
+          mobileMenuOpen ? "sidebar-open" : ""
+        }`}
+      >
         <div className="sidebar-header">
           <div className="brand-mark">
             <Bot size={21} />
@@ -151,12 +166,19 @@ function TradingApplication() {
                 end={item.to === "/"}
                 onClick={() => setMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `navigation-link ${isActive ? "active" : ""}`
+                  `navigation-link ${
+                    isActive ? "active" : ""
+                  }`
                 }
               >
                 <Icon size={19} />
+
                 <span>{item.label}</span>
-                <ChevronRight size={16} className="navigation-arrow" />
+
+                <ChevronRight
+                  size={16}
+                  className="navigation-arrow"
+                />
               </NavLink>
             );
           })}
@@ -165,6 +187,7 @@ function TradingApplication() {
         <div className="sidebar-footer">
           <div className="security-badge">
             <ShieldCheck size={17} />
+
             <div>
               <strong>Trading safety</strong>
               <span>Risk controls enabled</span>
@@ -199,9 +222,12 @@ function TradingApplication() {
           <div className="topbar-status">
             <span
               className={`status-dot ${
-                backendStatus === "online" ? "online" : ""
+                backendStatus === "online"
+                  ? "online"
+                  : ""
               }`}
             />
+
             <span>
               {backendStatus === "online"
                 ? "System online"
@@ -270,7 +296,8 @@ function ConnectionStatus({ label, status }) {
       <span className="connection-value">
         <span
           className={`status-dot ${
-            status === "connected" || status === "online"
+            status === "connected" ||
+            status === "online"
               ? "online"
               : ""
           }`}
@@ -293,29 +320,41 @@ function CommandCenter() {
     let mounted = true;
 
     async function loadCommandCenter() {
-      setLoading(true);
-      setError("");
-
       try {
-        const [priceResponse, analysisResponse, mtfResponse] =
-          await Promise.all([
-            api.get("/api/mt5/market-data/ticks"),
-            api.get(
-              "/api/mt5/market-data/analysis/ai/XAUUSD/15m",
-            ),
-            api.get(
-              "/api/mt5/analysis/multi-timeframe/XAUUSD",
-              {
-                params: {
-                  primary_timeframe: "15m",
-                  limit: 500,
-                  strength: 2,
-                  lookback: 20,
-                  minimum_touches: 2,
-                },
+        setError("");
+
+        const [
+          priceResponse,
+          analysisResponse,
+          mtfResponse,
+        ] = await Promise.all([
+          api.get("/api/mt5/market-data/ticks"),
+
+          api.get(
+            "/api/mt5/market-data/analysis/ai/XAUUSD/15m",
+            {
+              params: {
+                limit: 500,
+                strength: 2,
+                lookback: 20,
+                minimum_touches: 2,
               },
-            ),
-          ]);
+            },
+          ),
+
+          api.get(
+            "/api/mt5/analysis/multi-timeframe/XAUUSD",
+            {
+              params: {
+                primary_timeframe: "15m",
+                limit: 500,
+                strength: 2,
+                lookback: 20,
+                minimum_touches: 2,
+              },
+            },
+          ),
+        ]);
 
         if (!mounted) {
           return;
@@ -353,16 +392,30 @@ function CommandCenter() {
     };
   }, []);
 
-  const aiBias =
-    analysis?.bias ||
-    analysis?.market_bias ||
-    mtf?.overall_bias ||
-    "unavailable";
+  const aiBias = analysis?.overall_bias || "neutral";
 
-  const confidence =
-    analysis?.confidence ??
-    mtf?.confidence ??
-    null;
+  const aiConfidence =
+    analysis?.confidence ?? null;
+
+  const mtfBias =
+    mtf?.overall_bias || "neutral";
+
+  const executionBias =
+    mtf?.execution_timeframe_bias ||
+    "neutral";
+
+  const higherTimeframeBias =
+    mtf?.higher_timeframe_bias ||
+    "neutral";
+
+  const marketCondition =
+    analysis?.market_condition ||
+    "range_or_uncertain";
+
+  const decision = getDecision(
+    aiBias,
+    aiConfidence,
+  );
 
   return (
     <section className="page">
@@ -388,25 +441,37 @@ function CommandCenter() {
               </span>
 
               <h2 className={biasClass(aiBias)}>
-                {formatBias(aiBias)}
+                {loading
+                  ? "Reading..."
+                  : formatBias(aiBias)}
               </h2>
+
+              {!loading && (
+                <div className="decision-description">
+                  {formatBias(marketCondition)}
+                </div>
+              )}
             </div>
 
             <div className="confidence-ring">
-              {confidence === null
+              {aiConfidence === null
                 ? "--"
-                : `${Number(confidence).toFixed(1)}%`}
+                : `${Number(aiConfidence).toFixed(1)}%`}
+
               <span>confidence</span>
             </div>
           </div>
 
           <div className="decision-description">
-            {loading
-              ? "Reading live market conditions..."
-              : analysis?.summary ||
-                analysis?.reasoning ||
-                mtf?.alignment ||
-                "The AI is evaluating current market structure and available evidence."}
+            {loading ? (
+              "Reading live market conditions..."
+            ) : (
+              <DecisionMessage
+                analysis={analysis}
+                mtf={mtf}
+                decision={decision}
+              />
+            )}
           </div>
 
           <div className="decision-footer">
@@ -425,14 +490,22 @@ function CommandCenter() {
         <section className="market-overview-card">
           <div className="section-heading">
             <div>
-              <span className="card-label">Live prices</span>
+              <span className="card-label">
+                Live prices
+              </span>
+
               <h3>Market overview</h3>
             </div>
           </div>
 
           <div className="price-list">
-            {["XAUUSD", "BTCUSD", "EURUSD"].map((symbol) => {
-              const item = prices?.prices?.[symbol];
+            {[
+              "XAUUSD",
+              "BTCUSD",
+              "EURUSD",
+            ].map((symbol) => {
+              const item =
+                prices?.prices?.[symbol];
 
               return (
                 <PriceRow
@@ -449,54 +522,177 @@ function CommandCenter() {
 
       <div className="section-title-row">
         <div>
-          <span className="card-label">Intelligence</span>
+          <span className="card-label">
+            Intelligence
+          </span>
+
           <h3>What the AI sees</h3>
         </div>
       </div>
 
       <div className="intelligence-grid">
         <InsightCard
-          title="Market bias"
-          value={formatBias(
-            analysis?.bias ||
-              analysis?.market_bias ||
-              "unavailable",
-          )}
-          description="Current directional assessment."
+          title="AI market bias"
+          value={formatBias(aiBias)}
+          description="Final weighted directional assessment."
         />
 
         <InsightCard
-          title="Structure"
-          value={
-            analysis?.market_structure?.trend ||
-            analysis?.structure?.trend ||
-            "Available"
-          }
-          description="Market-structure assessment from MT5 candles."
+          title="15m execution bias"
+          value={formatBias(executionBias)}
+          description="Directional assessment for the primary execution timeframe."
         />
 
         <InsightCard
-          title="Liquidity"
-          value={
-            analysis?.liquidity?.direction ||
-            analysis?.liquidity_direction ||
-            "Monitored"
-          }
-          description="Liquidity and sweep evidence."
+          title="Higher timeframe"
+          value={formatBias(higherTimeframeBias)}
+          description="Combined 1h and 4h directional context."
         />
 
         <InsightCard
-          title="Multi-timeframe"
-          value={formatBias(
-            mtf?.overall_bias ||
-              mtf?.bias ||
-              "unavailable",
-          )}
-          description={
-            mtf?.alignment ||
-            "Cross-timeframe confirmation."
-          }
+          title="Market condition"
+          value={formatBias(marketCondition)}
+          description="Current market regime and conviction."
         />
+      </div>
+
+      <div className="analysis-panel">
+        <div className="panel-heading">
+          <Bot size={20} />
+
+          <div>
+            <h3>Multi-timeframe context</h3>
+            <span>
+              XAUUSD · live MT5 analysis
+            </span>
+          </div>
+        </div>
+
+        <div className="reasoning-content">
+          <ReasoningBlock
+            title="Overall MTF bias"
+            value={formatBias(mtfBias)}
+          />
+
+          <ReasoningBlock
+            title="MTF alignment"
+            value={
+              mtf?.alignment ||
+              "No alignment information returned."
+            }
+          />
+
+          <ReasoningBlock
+            title="Higher timeframe"
+            value={formatBias(higherTimeframeBias)}
+          />
+
+          <ReasoningBlock
+            title="15m execution timeframe"
+            value={formatBias(executionBias)}
+          />
+
+          <ReasoningBlock
+            title="AI action"
+            value={decision}
+          />
+        </div>
+      </div>
+
+      <div className="analysis-panel">
+        <div className="panel-heading">
+          <Activity size={20} />
+
+          <div>
+            <h3>AI evidence</h3>
+            <span>
+              Structure, liquidity and institutional-style
+              market context
+            </span>
+          </div>
+        </div>
+
+        <div className="reasoning-content">
+          <ReasoningBlock
+            title="Structure"
+            value={formatNestedTrend(
+              analysis?.market_structure,
+              analysis?.trend,
+            )}
+          />
+
+          <ReasoningBlock
+            title="Liquidity"
+            value={describeLiquidity(
+              analysis?.liquidity,
+            )}
+          />
+
+          <ReasoningBlock
+            title="Fair value gaps"
+            value={describeCollection(
+              analysis?.fvg,
+              "FVG",
+            )}
+          />
+
+          <ReasoningBlock
+            title="Order blocks"
+            value={describeCollection(
+              analysis?.order_blocks,
+              "order block",
+            )}
+          />
+
+          <ReasoningBlock
+            title="Support / resistance"
+            value={describeSupportResistance(
+              analysis?.support_resistance,
+            )}
+          />
+        </div>
+      </div>
+
+      <div className="analysis-panel">
+        <div className="panel-heading">
+          <ShieldCheck size={20} />
+
+          <div>
+            <h3>AI safety interpretation</h3>
+            <span>
+              The platform does not turn a low-confidence
+              bias into an automatic trade.
+            </span>
+          </div>
+        </div>
+
+        <div className="reasoning-content">
+          <ReasoningBlock
+            title="Decision"
+            value={decision}
+          />
+
+          <ReasoningBlock
+            title="Confirmations"
+            value={
+              formatList(
+                analysis?.confirmations,
+              ) ||
+              "No directional confirmations returned."
+            }
+          />
+
+          <ReasoningBlock
+            title="Warnings"
+            value={
+              formatList(
+                analysis?.warnings,
+              ) ||
+              formatList(mtf?.warnings) ||
+              "No warnings returned."
+            }
+          />
+        </div>
       </div>
     </section>
   );
@@ -584,32 +780,35 @@ function AIAnalysis() {
     try {
       setError("");
 
-      const [aiResponse, mtfResponse] =
-        await Promise.all([
-          api.get(
-            "/api/mt5/market-data/analysis/ai/XAUUSD/15m",
-            {
-              params: {
-                limit: 500,
-                strength: 2,
-                lookback: 20,
-                minimum_touches: 2,
-              },
+      const [
+        aiResponse,
+        mtfResponse,
+      ] = await Promise.all([
+        api.get(
+          "/api/mt5/market-data/analysis/ai/XAUUSD/15m",
+          {
+            params: {
+              limit: 500,
+              strength: 2,
+              lookback: 20,
+              minimum_touches: 2,
             },
-          ),
-          api.get(
-            "/api/mt5/analysis/multi-timeframe/XAUUSD",
-            {
-              params: {
-                primary_timeframe: "15m",
-                limit: 500,
-                strength: 2,
-                lookback: 20,
-                minimum_touches: 2,
-              },
+          },
+        ),
+
+        api.get(
+          "/api/mt5/analysis/multi-timeframe/XAUUSD",
+          {
+            params: {
+              primary_timeframe: "15m",
+              limit: 500,
+              strength: 2,
+              lookback: 20,
+              minimum_touches: 2,
             },
-          ),
-        ]);
+          },
+        ),
+      ]);
 
       setAnalysis(aiResponse.data);
       setMtf(mtfResponse.data);
@@ -634,6 +833,17 @@ function AIAnalysis() {
     return () => window.clearInterval(interval);
   }, []);
 
+  const bias =
+    analysis?.overall_bias || "neutral";
+
+  const confidence =
+    analysis?.confidence ?? null;
+
+  const decision = getDecision(
+    bias,
+    confidence,
+  );
+
   return (
     <section className="page">
       <PageHeading
@@ -647,20 +857,16 @@ function AIAnalysis() {
       <div className="analysis-summary-grid">
         <MetricCard
           label="AI bias"
-          value={formatBias(
-            analysis?.bias ||
-              analysis?.market_bias ||
-              "unavailable",
-          )}
+          value={formatBias(bias)}
           loading={loading}
         />
 
         <MetricCard
           label="Confidence"
           value={
-            analysis?.confidence == null
+            confidence == null
               ? "--"
-              : `${Number(analysis.confidence).toFixed(1)}%`
+              : `${Number(confidence).toFixed(1)}%`
           }
           loading={loading}
         />
@@ -668,19 +874,14 @@ function AIAnalysis() {
         <MetricCard
           label="MTF bias"
           value={formatBias(
-            mtf?.overall_bias ||
-              mtf?.bias ||
-              "unavailable",
+            mtf?.overall_bias || "neutral",
           )}
           loading={loading}
         />
 
         <MetricCard
-          label="Alignment"
-          value={
-            mtf?.alignment ||
-            "Unavailable"
-          }
+          label="AI action"
+          value={decision}
           loading={loading}
         />
       </div>
@@ -688,46 +889,177 @@ function AIAnalysis() {
       <div className="analysis-panel">
         <div className="panel-heading">
           <Bot size={20} />
+
           <div>
             <h3>AI reasoning</h3>
-            <span>XAUUSD · 15m</span>
+            <span>
+              XAUUSD · 15m
+            </span>
           </div>
         </div>
 
         <div className="reasoning-content">
-          {loading ? (
-            <LoadingText />
+          <ReasoningBlock
+            title="Final bias"
+            value={formatBias(bias)}
+          />
+
+          <ReasoningBlock
+            title="Market condition"
+            value={formatBias(
+              analysis?.market_condition ||
+                "range_or_uncertain",
+            )}
+          />
+
+          <ReasoningBlock
+            title="Decision"
+            value={decision}
+          />
+
+          <ReasoningBlock
+            title="Directional scores"
+            value={formatScores(
+              analysis?.scores,
+            )}
+          />
+
+          <ReasoningBlock
+            title="Reasons"
+            value={
+              formatList(
+                analysis?.reasons,
+              ) ||
+              "No detailed reasons returned."
+            }
+          />
+
+          <ReasoningBlock
+            title="Warnings"
+            value={
+              formatList(
+                analysis?.warnings,
+              ) ||
+              formatList(mtf?.warnings) ||
+              "No warnings returned."
+            }
+          />
+        </div>
+      </div>
+
+      <div className="analysis-panel">
+        <div className="panel-heading">
+          <TrendingUp size={20} />
+
+          <div>
+            <h3>Timeframe breakdown</h3>
+            <span>
+              Lower timeframe, execution timeframe and
+              higher timeframe context
+            </span>
+          </div>
+        </div>
+
+        <div className="reasoning-content">
+          {Array.isArray(mtf?.analyses) &&
+          mtf.analyses.length > 0 ? (
+            mtf.analyses.map((timeframe) => (
+              <ReasoningBlock
+                key={timeframe.timeframe}
+                title={`${timeframe.timeframe} · ${timeframe.status}`}
+                value={`${formatBias(
+                  timeframe.bias,
+                )} · ${Number(
+                  timeframe.confidence || 0,
+                ).toFixed(1)}% confidence · ${formatBias(
+                  timeframe.market_condition,
+                )}`}
+              />
+            ))
           ) : (
-            <>
-              <ReasoningBlock
-                title="Decision"
-                value={
-                  analysis?.decision ||
-                  analysis?.bias ||
-                  analysis?.market_bias ||
-                  "Unavailable"
-                }
-              />
+            <ReasoningBlock
+              title="Timeframes"
+              value="No timeframe analysis returned."
+            />
+          )}
 
-              <ReasoningBlock
-                title="Summary"
-                value={
-                  analysis?.summary ||
-                  analysis?.reasoning ||
-                  "No summary was returned by the backend."
-                }
-              />
+          <ReasoningBlock
+            title="Higher timeframe bias"
+            value={formatBias(
+              mtf?.higher_timeframe_bias ||
+                "neutral",
+            )}
+          />
 
-              <ReasoningBlock
-                title="Warnings"
-                value={
-                  Array.isArray(mtf?.warnings)
-                    ? mtf.warnings.join(" ")
-                    : mtf?.warnings ||
-                      "No warnings returned."
-                }
-              />
-            </>
+          <ReasoningBlock
+            title="15m execution bias"
+            value={formatBias(
+              mtf?.execution_timeframe_bias ||
+                "neutral",
+            )}
+          />
+
+          <ReasoningBlock
+            title="MTF alignment"
+            value={
+              mtf?.alignment ||
+              "No alignment information returned."
+            }
+          />
+
+          <ReasoningBlock
+            title="MTF conflicts"
+            value={
+              formatList(
+                mtf?.conflicts,
+              ) ||
+              "No conflicts returned."
+            }
+          />
+        </div>
+      </div>
+
+      <div className="analysis-panel">
+        <div className="panel-heading">
+          <Activity size={20} />
+
+          <div>
+            <h3>Component evidence</h3>
+            <span>
+              How the weighted AI engine reached its
+              directional assessment
+            </span>
+          </div>
+        </div>
+
+        <div className="reasoning-content">
+          {Array.isArray(
+            analysis?.components,
+          ) &&
+          analysis.components.length > 0 ? (
+            analysis.components.map(
+              (component) => (
+                <ReasoningBlock
+                  key={component.name}
+                  title={`${formatBias(
+                    component.name,
+                  )} · ${component.weight}% weight`}
+                  value={`${formatBias(
+                    component.signal,
+                  )} · ${Number(
+                    component.confidence || 0,
+                  ).toFixed(1)}% confidence · ${
+                    component.reason ||
+                    "No component explanation returned."
+                  }`}
+                />
+              ),
+            )
+          ) : (
+            <ReasoningBlock
+              title="Components"
+              value="No component evidence returned."
+            />
           )}
         </div>
       </div>
@@ -786,9 +1118,10 @@ function SettingsPage() {
 
           <div>
             <h3>Risk protection</h3>
+
             <p>
-              Trading safety controls remain enforced by
-              the backend execution layer.
+              Trading safety controls remain enforced
+              by the backend execution layer.
             </p>
           </div>
         </div>
@@ -800,6 +1133,7 @@ function SettingsPage() {
 
           <div>
             <h3>Interface</h3>
+
             <p>
               The interface is optimized for mobile,
               tablet and desktop screens.
@@ -811,7 +1145,11 @@ function SettingsPage() {
   );
 }
 
-function PriceRow({ symbol, data, loading }) {
+function PriceRow({
+  symbol,
+  data,
+  loading,
+}) {
   if (loading && !data) {
     return (
       <div className="price-row">
@@ -825,6 +1163,7 @@ function PriceRow({ symbol, data, loading }) {
     return (
       <div className="price-row">
         <span>{symbol}</span>
+
         <span className="muted">
           {data?.error || "Unavailable"}
         </span>
@@ -836,8 +1175,11 @@ function PriceRow({ symbol, data, loading }) {
     <div className="price-row">
       <div>
         <strong>{symbol}</strong>
+
         <span>
-          {data.mt5_symbol || data.symbol || symbol}
+          {data.mt5_symbol ||
+            data.symbol ||
+            symbol}
         </span>
       </div>
 
@@ -854,14 +1196,23 @@ function PriceRow({ symbol, data, loading }) {
   );
 }
 
-function MarketCard({ symbol, data, loading }) {
+function MarketCard({
+  symbol,
+  data,
+  loading,
+}) {
   return (
     <article className="market-card">
       <div className="market-card-header">
         <div>
-          <span className="market-symbol">{symbol}</span>
+          <span className="market-symbol">
+            {symbol}
+          </span>
+
           <span className="market-source">
-            {data?.mt5_symbol || data?.symbol || "MT5"}
+            {data?.mt5_symbol ||
+              data?.symbol ||
+              "MT5"}
           </span>
         </div>
 
@@ -874,7 +1225,9 @@ function MarketCard({ symbol, data, loading }) {
       {loading && !data ? (
         <LoadingText />
       ) : data?.error ? (
-        <p className="muted">{data.error}</p>
+        <p className="muted">
+          {data.error}
+        </p>
       ) : (
         <>
           <div className="market-price">
@@ -904,13 +1257,21 @@ function InsightCard({
   return (
     <article className="insight-card">
       <span>{title}</span>
-      <strong>{formatValue(value)}</strong>
+
+      <strong>
+        {formatValue(value)}
+      </strong>
+
       <p>{description}</p>
     </article>
   );
 }
 
-function MetricCard({ label, value, loading }) {
+function MetricCard({
+  label,
+  value,
+  loading,
+}) {
   return (
     <article className="metric-card">
       <span>{label}</span>
@@ -918,13 +1279,18 @@ function MetricCard({ label, value, loading }) {
       {loading ? (
         <LoadingText />
       ) : (
-        <strong>{formatValue(value)}</strong>
+        <strong>
+          {formatValue(value)}
+        </strong>
       )}
     </article>
   );
 }
 
-function ReasoningBlock({ title, value }) {
+function ReasoningBlock({
+  title,
+  value,
+}) {
   return (
     <div className="reasoning-block">
       <span>{title}</span>
@@ -940,8 +1306,12 @@ function PageHeading({
 }) {
   return (
     <div className="page-heading">
-      <span className="eyebrow">{eyebrow}</span>
+      <span className="eyebrow">
+        {eyebrow}
+      </span>
+
       <h1>{title}</h1>
+
       <p>{description}</p>
     </div>
   );
@@ -956,22 +1326,143 @@ function ErrorBanner({ message }) {
   );
 }
 
-function EmptyState({ title, description }) {
+function EmptyState({
+  title,
+  description,
+}) {
   return (
     <div className="empty-state">
       <BriefcaseBusiness size={25} />
+
       <h3>{title}</h3>
+
       <p>{description}</p>
     </div>
   );
 }
 
 function LoadingText() {
-  return <span className="loading-text">Loading live data...</span>;
+  return (
+    <span className="loading-text">
+      Loading live data...
+    </span>
+  );
+}
+
+function DecisionMessage({
+  analysis,
+  mtf,
+  decision,
+}) {
+  const overallBias =
+    analysis?.overall_bias ||
+    "neutral";
+
+  const confidence =
+    Number(analysis?.confidence || 0);
+
+  const executionBias =
+    mtf?.execution_timeframe_bias ||
+    "neutral";
+
+  const higherBias =
+    mtf?.higher_timeframe_bias ||
+    "neutral";
+
+  if (
+    overallBias === "neutral"
+  ) {
+    return (
+      "The current evidence is mixed or insufficiently aligned for a reliable directional bias."
+    );
+  }
+
+  if (
+    executionBias !== overallBias &&
+    executionBias !== "neutral"
+  ) {
+    return (
+      `${formatBias(
+        executionBias,
+      )} short-term execution conditions are conflicting with the ${formatBias(
+        overallBias,
+      )} overall AI bias. ${decision}.`
+    );
+  }
+
+  if (
+    higherBias !== overallBias &&
+    higherBias !== "neutral"
+  ) {
+    return (
+      `${formatBias(
+        executionBias,
+      )} execution conditions are different from the ${formatBias(
+        higherBias,
+      )} higher-timeframe context. ${decision}.`
+    );
+  }
+
+  if (confidence < 50) {
+    return (
+      `${formatBias(
+        overallBias,
+      )} evidence exists, but conviction is low at ${confidence.toFixed(
+        1,
+      )}%. ${decision}.`
+    );
+  }
+
+  if (confidence < 65) {
+    return (
+      `${formatBias(
+        overallBias,
+      )} evidence has an advantage, but additional confirmation is required. ${decision}.`
+    );
+  }
+
+  return (
+    `${formatBias(
+      overallBias,
+    )} evidence currently has the strongest weighted advantage. ${decision}.`
+  );
+}
+
+function getDecision(
+  bias,
+  confidence,
+) {
+  const normalized =
+    String(bias || "neutral").toLowerCase();
+
+  const numericConfidence =
+    Number(confidence || 0);
+
+  if (
+    normalized === "neutral" ||
+    !["bullish", "bearish"].includes(
+      normalized,
+    )
+  ) {
+    return "WAIT — NO CLEAR DIRECTION";
+  }
+
+  if (numericConfidence < 50) {
+    return "WAIT — LOW CONFIDENCE";
+  }
+
+  if (numericConfidence < 65) {
+    return "WAIT — CONFIRMATION REQUIRED";
+  }
+
+  return `${formatBias(
+    normalized,
+  )} BIAS — SETUP CONFIRMATION REQUIRED`;
 }
 
 function biasClass(value) {
-  const normalized = String(value).toLowerCase();
+  const normalized =
+    String(value).toLowerCase();
 
   if (normalized.includes("bull")) {
     return "bias-bullish";
@@ -985,7 +1476,9 @@ function biasClass(value) {
 }
 
 function formatBias(value) {
-  const text = String(value || "unavailable")
+  const text = String(
+    value || "unavailable",
+  )
     .replaceAll("_", " ")
     .trim();
 
@@ -993,7 +1486,10 @@ function formatBias(value) {
     return "Unavailable";
   }
 
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  return (
+    text.charAt(0).toUpperCase() +
+    text.slice(1)
+  );
 }
 
 function formatValue(value) {
@@ -1025,10 +1521,169 @@ function formatNumber(value) {
     return "--";
   }
 
-  return Number(value).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 5,
-  });
+  return Number(value).toLocaleString(
+    undefined,
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 5,
+    },
+  );
+}
+
+function formatList(value) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .filter(Boolean)
+    .map(formatBias)
+    .join(" · ");
+}
+
+function formatScores(scores) {
+  if (!scores) {
+    return "No directional scores returned.";
+  }
+
+  const bullish =
+    Number(scores.bullish || 0);
+
+  const bearish =
+    Number(scores.bearish || 0);
+
+  return `Bullish ${bullish.toFixed(
+    2,
+  )} · Bearish ${bearish.toFixed(2)}`;
+}
+
+function formatNestedTrend(
+  structure,
+  fallback,
+) {
+  if (!structure) {
+    return formatBias(
+      fallback || "neutral",
+    );
+  }
+
+  const trend =
+    structure.trend ||
+    fallback ||
+    "neutral";
+
+  const structureEvents =
+    Array.isArray(structure.structure)
+      ? structure.structure
+      : [];
+
+  const latest =
+    structureEvents.length > 0
+      ? structureEvents[
+          structureEvents.length - 1
+        ]
+      : null;
+
+  if (latest) {
+    const eventType =
+      latest.type ||
+      latest.event ||
+      "structure event";
+
+    const direction =
+      latest.direction ||
+      "neutral";
+
+    return `${formatBias(
+      trend,
+    )} · latest ${formatBias(
+      direction,
+    )} ${formatBias(eventType)}`;
+  }
+
+  return formatBias(trend);
+}
+
+function describeLiquidity(
+  liquidity,
+) {
+  if (!liquidity) {
+    return "No liquidity data returned.";
+  }
+
+  const sweeps =
+    Array.isArray(
+      liquidity.liquidity_sweeps,
+    )
+      ? liquidity.liquidity_sweeps
+      : [];
+
+  if (sweeps.length === 0) {
+    return "No recent relevant liquidity sweeps detected.";
+  }
+
+  const latest =
+    sweeps[sweeps.length - 1];
+
+  return `${sweeps.length} liquidity sweep(s) detected · latest ${formatBias(
+    latest.direction ||
+      "neutral",
+  )}`;
+}
+
+function describeCollection(
+  data,
+  label,
+) {
+  if (!data) {
+    return `No ${label} data returned.`;
+  }
+
+  const active =
+    Array.isArray(
+      data.active_fvg,
+    )
+      ? data.active_fvg
+      : Array.isArray(
+          data.active_order_blocks,
+        )
+        ? data.active_order_blocks
+        : [];
+
+  if (active.length === 0) {
+    return `No relevant active ${label} evidence detected.`;
+  }
+
+  return `${active.length} active ${label} signal(s) detected.`;
+}
+
+function describeSupportResistance(
+  data,
+) {
+  if (!data) {
+    return "No support/resistance data returned.";
+  }
+
+  const support =
+    data.nearest_support;
+
+  const resistance =
+    data.nearest_resistance;
+
+  const supportText = support?.price
+    ? `Support ${formatNumber(
+        support.price,
+      )}`
+    : "Support unavailable";
+
+  const resistanceText =
+    resistance?.price
+      ? `Resistance ${formatNumber(
+          resistance.price,
+        )}`
+      : "Resistance unavailable";
+
+  return `${supportText} · ${resistanceText}`;
 }
 
 export default App;
