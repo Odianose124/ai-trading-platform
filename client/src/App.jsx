@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -23,6 +23,7 @@ import {
   Routes,
 } from "react-router-dom";
 import api from "./services/api";
+import TradeHistoryPage from "./TradeHistoryPage";
 import "./App.css";
 
 const navigation = [
@@ -442,7 +443,7 @@ function CommandCenter() {
           <div className="decision-main">
             <div>
               <span className="instrument-label">
-                XAUUSD · 15m
+                XAUUSD Â· 15m
               </span>
 
               <h2 className={biasClass(aiBias)}>
@@ -568,7 +569,7 @@ function CommandCenter() {
           <div>
             <h3>Multi-timeframe context</h3>
             <span>
-              XAUUSD · live MT5 analysis
+              XAUUSD Â· live MT5 analysis
             </span>
           </div>
         </div>
@@ -899,7 +900,7 @@ function AIAnalysis() {
 
           <div>
             <h3>AI reasoning</h3>
-            <span>XAUUSD · 15m</span>
+            <span>XAUUSD Â· 15m</span>
           </div>
         </div>
 
@@ -971,12 +972,12 @@ function AIAnalysis() {
             mtf.analyses.map((timeframe) => (
               <ReasoningBlock
                 key={timeframe.timeframe}
-                title={`${timeframe.timeframe} · ${timeframe.status}`}
+                title={`${timeframe.timeframe} Â· ${timeframe.status}`}
                 value={`${formatBias(
                   timeframe.bias,
-                )} · ${Number(
+                )} Â· ${Number(
                   timeframe.confidence || 0,
-                ).toFixed(1)}% confidence · ${formatBias(
+                ).toFixed(1)}% confidence Â· ${formatBias(
                   timeframe.market_condition,
                 )}`}
               />
@@ -1046,12 +1047,12 @@ function AIAnalysis() {
                   key={component.name}
                   title={`${formatBias(
                     component.name,
-                  )} · ${component.weight}% weight`}
+                  )} Â· ${component.weight}% weight`}
                   value={`${formatBias(
                     component.signal,
-                  )} · ${Number(
+                  )} Â· ${Number(
                     component.confidence || 0,
-                  ).toFixed(1)}% confidence · ${
+                  ).toFixed(1)}% confidence Â· ${
                     component.reason ||
                     "No component explanation returned."
                   }`}
@@ -1172,7 +1173,7 @@ function Positions() {
           </strong>
 
           <span>
-            Auto-refreshing every 5 seconds ·
+            Auto-refreshing every 5 seconds Â·
             AI-managed positions only
           </span>
         </div>
@@ -1404,7 +1405,7 @@ function LivePositionCard({
 
       <div className="position-card-footer">
         <span>
-          MT5 · AI managed
+          MT5 Â· AI managed
         </span>
 
         <span>
@@ -1428,20 +1429,7 @@ function PositionDetail({
 }
 
 function TradeHistory() {
-  return (
-    <section className="page">
-      <PageHeading
-        eyebrow="History"
-        title="Trade history"
-        description="Executed trades and their outcomes will be displayed here as the execution and history APIs are exposed to the frontend."
-      />
-
-      <EmptyState
-        title="No trade history available"
-        description="There are currently no executed trades available to display."
-      />
-    </section>
-  );
+  return <TradeHistoryPage />;
 }
 
 function SettingsPage() {
@@ -1775,20 +1763,20 @@ function getDecision(
       normalized,
     )
   ) {
-    return "WAIT — NO CLEAR DIRECTION";
+    return "WAIT â€” NO CLEAR DIRECTION";
   }
 
   if (numericConfidence < 50) {
-    return "WAIT — LOW CONFIDENCE";
+    return "WAIT â€” LOW CONFIDENCE";
   }
 
   if (numericConfidence < 65) {
-    return "WAIT — CONFIRMATION REQUIRED";
+    return "WAIT â€” CONFIRMATION REQUIRED";
   }
 
   return `${formatBias(
     normalized,
-  )} BIAS — SETUP CONFIRMATION REQUIRED`;
+  )} BIAS â€” SETUP CONFIRMATION REQUIRED`;
 }
 
 function biasClass(value) {
@@ -1912,7 +1900,7 @@ function formatList(value) {
   return value
     .filter(Boolean)
     .map(formatBias)
-    .join(" · ");
+    .join(" Â· ");
 }
 
 function formatScores(scores) {
@@ -1928,7 +1916,7 @@ function formatScores(scores) {
 
   return `Bullish ${bullish.toFixed(
     2,
-  )} · Bearish ${bearish.toFixed(2)}`;
+  )} Â· Bearish ${bearish.toFixed(2)}`;
 }
 
 function formatNestedTrend(
@@ -1970,7 +1958,7 @@ function formatNestedTrend(
 
     return `${formatBias(
       trend,
-    )} · latest ${formatBias(
+    )} Â· latest ${formatBias(
       direction,
     )} ${formatBias(eventType)}`;
   }
@@ -1999,7 +1987,7 @@ function describeLiquidity(
   const latest =
     sweeps[sweeps.length - 1];
 
-  return `${sweeps.length} liquidity sweep(s) detected · latest ${formatBias(
+  return `${sweeps.length} liquidity sweep(s) detected Â· latest ${formatBias(
     latest.direction ||
       "neutral",
   )}`;
@@ -2057,7 +2045,7 @@ function describeSupportResistance(
         )}`
       : "Resistance unavailable";
 
-  return `${supportText} · ${resistanceText}`;
+  return `${supportText} Â· ${resistanceText}`;
 }
 
 export default App;
