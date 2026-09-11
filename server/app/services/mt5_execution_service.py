@@ -1080,6 +1080,90 @@ class MT5ExecutionService:
         # SEND ORDER
         # ---------------------------------------------------------
 
+        # ---------------------------------------------------------
+        # MT5 BROKER PREFLIGHT
+        # ---------------------------------------------------------
+        # order_check() validates the exact request with the broker
+        # without sending the trade.
+        preflight = mt5.order_check(request)
+
+        if preflight is None:
+            return MT5ExecutionResult(
+                approved=False,
+                status="preflight_failed",
+                symbol=application_symbol,
+                broker_symbol=broker_symbol,
+                direction=normalized_direction,
+                volume=requested_volume,
+                requested_entry_price=signal_entry,
+                execution_price=final_execution_price,
+                stop_loss=requested_stop_loss,
+                take_profit=requested_take_profit,
+                signal_price_deviation=final_deviation,
+                signal_price_deviation_percent=final_deviation_percent,
+                margin_required=margin_required,
+                free_margin=free_margin,
+                checks=checks,
+                warnings=warnings,
+                errors=[
+                    "MT5 order_check returned no result: "
+                    f"{mt5.last_error()}"
+                ],
+                execution_sent=False,
+                message=(
+                    "Execution blocked because MT5 broker "
+                    "preflight returned no result."
+                ),
+            )
+
+        preflight_retcode = int(
+            getattr(preflight, "retcode", 0) or 0
+        )
+
+        preflight_comment = str(
+            getattr(preflight, "comment", "") or ""
+        )
+
+        if preflight_retcode != 0:
+            return MT5ExecutionResult(
+                approved=False,
+                status="preflight_failed",
+                symbol=application_symbol,
+                broker_symbol=broker_symbol,
+                direction=normalized_direction,
+                volume=requested_volume,
+                requested_entry_price=signal_entry,
+                execution_price=final_execution_price,
+                stop_loss=requested_stop_loss,
+                take_profit=requested_take_profit,
+                signal_price_deviation=final_deviation,
+                signal_price_deviation_percent=final_deviation_percent,
+                margin_required=margin_required,
+                free_margin=free_margin,
+                checks=checks,
+                warnings=warnings,
+                errors=[
+                    "MT5 order_check failed: "
+                    f"retcode={preflight_retcode}, "
+                    f"comment={preflight_comment}"
+                ],
+                execution_sent=False,
+                message=(
+                    "Execution blocked because the MT5 "
+                    "broker preflight check failed."
+                ),
+            )
+
+        checks.append(
+            "MT5 order_check passed: "
+            f"retcode={preflight_retcode}, "
+            f"comment={preflight_comment}"
+        )
+
+        # ---------------------------------------------------------
+        # SEND ORDER
+        # ---------------------------------------------------------
+
         result = mt5.order_send(
             request
         )
