@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import api from "./services/api";
+import TradeReviewPanel from "./TradeReviewPanel";
 import "./trading.css";
 
 const SYMBOL = "XAUUSD";
@@ -652,6 +653,10 @@ function TradingPage() {
         </div>
       </section>
 
+      <TradeReviewPanel
+        setup={setup}
+        isTradeReady={isTradeReady}
+      />
       <div className="trading-bottom-safety">
         <ShieldCheck size={19} />
 
