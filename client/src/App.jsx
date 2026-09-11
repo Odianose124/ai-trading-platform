@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -26,6 +26,7 @@ import api from "./services/api";
 import TradeHistoryPage from "./TradeHistoryPage";
 import MarketsPage from "./MarketsPage";
 import AIAnalysisPage from "./AIAnalysisPage";
+import TradingPage from "./TradingPage";
 import "./App.css";
 
 const navigation = [
@@ -43,6 +44,11 @@ const navigation = [
     to: "/ai-analysis",
     label: "AI Analysis",
     icon: Bot,
+  },
+  {
+    to: "/trading",
+    label: "Trading",
+    icon: TrendingUp,
   },
   {
     to: "/positions",
@@ -259,6 +265,11 @@ function TradingApplication() {
   path="/ai-analysis"
   element={<AIAnalysisPage />}
 />
+
+            <Route
+              path="/trading"
+              element={<TradingPage />}
+            />
 
             <Route
               path="/positions"
@@ -2177,3 +2188,4 @@ function describeSupportResistance(
 }
 
 export default App;
+
