@@ -27,6 +27,7 @@ import TradeHistoryPage from "./TradeHistoryPage";
 import MarketsPage from "./MarketsPage";
 import AIAnalysisPage from "./AIAnalysisPage";
 import TradingPage from "./TradingPage";
+import LoginPage from "./LoginPage.jsx";
 import "./App.css";
 
 const navigation = [
@@ -70,9 +71,109 @@ const navigation = [
 function App() {
   return (
     <BrowserRouter>
-      <TradingApplication />
+      <AuthenticationGate />
     </BrowserRouter>
   );
+}
+
+function AuthenticationGate() {
+  const [authState, setAuthState] = useState("checking");
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function validateSession() {
+      const token = localStorage.getItem(
+        "ai_trading_access_token",
+      );
+
+      if (!token) {
+        if (mounted) {
+          setAuthState("unauthenticated");
+          setUser(null);
+        }
+
+        return;
+      }
+
+      try {
+        const response = await api.get(
+          "/api/auth/me",
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        setUser(response.data);
+        setAuthState("authenticated");
+      } catch {
+        localStorage.removeItem(
+          "ai_trading_access_token",
+        );
+
+        if (mounted) {
+          setUser(null);
+          setAuthState("unauthenticated");
+        }
+      }
+    }
+
+    validateSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (authState === "checking") {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#020617",
+          color: "#94a3b8",
+          fontFamily:
+            "Inter, system-ui, sans-serif",
+        }}
+      >
+        Checking secure session...
+      </div>
+    );
+  }
+
+  if (authState === "unauthenticated") {
+    return (
+      <Routes>
+        <Route
+          path="/login"
+          element={<LoginPage />}
+        />
+
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to="/login"
+              replace
+              state={{
+                from: {
+                  pathname:
+                    window.location.pathname,
+                },
+              }}
+            />
+          }
+        />
+      </Routes>
+    );
+  }
+
+  return <TradingApplication user={user} />;
 }
 
 function TradingApplication() {

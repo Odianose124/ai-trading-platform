@@ -22,6 +22,10 @@ function TradeReviewPanel({ setup, isTradeReady }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
 
+  const [intent, setIntent] = useState(null);
+  const [intentLoading, setIntentLoading] = useState(false);
+  const [intentError, setIntentError] = useState("");
+
   const canPreview =
     Boolean(isTradeReady) &&
     Number(volume) > 0 &&
@@ -37,6 +41,8 @@ function TradeReviewPanel({ setup, isTradeReady }) {
     setPreviewLoading(true);
     setPreviewError("");
     setPreview(null);
+    setIntent(null);
+    setIntentError("");
 
     try {
       const response = await api.post(
@@ -64,6 +70,89 @@ function TradeReviewPanel({ setup, isTradeReady }) {
       );
     } finally {
       setPreviewLoading(false);
+    }
+  }
+
+  async function createTradeIntent() {
+    if (!preview?.approved || intentLoading) {
+      return;
+    }
+
+    setIntentLoading(true);
+    setIntentError("");
+    setIntent(null);
+
+    try {
+      const response = await api.post(
+        "/api/trade-intents",
+        {
+          symbol: setup.symbol || "XAUUSD",
+          broker_symbol:
+            preview.broker_symbol ||
+            setup.broker_symbol ||
+            setup.mt5_symbol ||
+            setup.symbol ||
+            "XAUUSD",
+
+          direction: setup.direction,
+
+          volume: Number(volume),
+
+          signal_entry_price: Number(
+            setup.entry_price,
+          ),
+
+          execution_price: Number(
+            preview.execution_price,
+          ),
+
+          stop_loss: Number(
+            setup.stop_loss,
+          ),
+
+          take_profit: Number(
+            setup.take_profit_1,
+          ),
+
+          risk_percent:
+            preview.risk?.percent === null ||
+            preview.risk?.percent === undefined
+              ? Number(riskPercent)
+              : Number(preview.risk.percent),
+
+          signal_price_deviation_percent:
+            preview.signal_price_deviation_percent ??
+            null,
+
+          margin_required:
+            preview.margin?.required ?? null,
+
+          free_margin:
+            preview.margin?.free ?? null,
+
+          preview_status:
+            preview.status || null,
+
+          warnings:
+            preview.warnings || [],
+
+          checks:
+            preview.checks || [],
+
+          errors:
+            preview.errors || [],
+        },
+      );
+
+      setIntent(response.data);
+    } catch (error) {
+      setIntentError(
+        error?.response?.data?.detail ||
+          error?.response?.data?.message ||
+          "Unable to create the trade intent.",
+      );
+    } finally {
+      setIntentLoading(false);
     }
   }
 
@@ -149,6 +238,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
         <div className="trade-review-field readonly">
           <span>Direction</span>
+
           <strong>
             {formatValue(setup?.direction)}
           </strong>
@@ -156,6 +246,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
         <div className="trade-review-field readonly">
           <span>Signal entry</span>
+
           <strong>
             {formatNumber(setup?.entry_price)}
           </strong>
@@ -163,6 +254,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
         <div className="trade-review-field readonly">
           <span>Stop loss</span>
+
           <strong>
             {formatNumber(setup?.stop_loss)}
           </strong>
@@ -170,6 +262,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
         <div className="trade-review-field readonly">
           <span>Take profit 1</span>
+
           <strong>
             {formatNumber(setup?.take_profit_1)}
           </strong>
@@ -184,7 +277,10 @@ function TradeReviewPanel({ setup, isTradeReady }) {
       >
         {previewLoading ? (
           <>
-            <LoaderCircle size={18} className="spin" />
+            <LoaderCircle
+              size={18}
+              className="spin"
+            />
             Validating with broker...
           </>
         ) : (
@@ -209,7 +305,9 @@ function TradeReviewPanel({ setup, isTradeReady }) {
       {preview && (
         <div
           className={`trade-review-result ${
-            approved ? "approved" : "blocked"
+            approved
+              ? "approved"
+              : "blocked"
           }`}
         >
           {approved ? (
@@ -247,16 +345,18 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
           <PreviewMetric
             label="Execution price"
-            value={formatNumber(preview.execution_price)}
+            value={formatNumber(
+              preview.execution_price,
+            )}
           />
 
           <PreviewMetric
             label="Signal deviation"
             value={
               preview.signal_price_deviation_percent ===
-              null ||
+                null ||
               preview.signal_price_deviation_percent ===
-              undefined
+                undefined
                 ? "--"
                 : `${formatNumber(
                     preview.signal_price_deviation_percent,
@@ -320,15 +420,17 @@ function TradeReviewPanel({ setup, isTradeReady }) {
           </div>
 
           <div className="trade-review-check-list">
-            {preview.checks.map((check, index) => (
-              <div
-                className="trade-review-check"
-                key={`${check}-${index}`}
-              >
-                <CheckCircle2 size={16} />
-                <span>{check}</span>
-              </div>
-            ))}
+            {preview.checks.map(
+              (check, index) => (
+                <div
+                  className="trade-review-check"
+                  key={`${check}-${index}`}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>{check}</span>
+                </div>
+              ),
+            )}
           </div>
         </div>
       )}
@@ -340,15 +442,17 @@ function TradeReviewPanel({ setup, isTradeReady }) {
           </div>
 
           <div className="trade-review-check-list">
-            {preview.warnings.map((warning, index) => (
-              <div
-                className="trade-review-check warning"
-                key={`${warning}-${index}`}
-              >
-                <AlertTriangle size={16} />
-                <span>{warning}</span>
-              </div>
-            ))}
+            {preview.warnings.map(
+              (warning, index) => (
+                <div
+                  className="trade-review-check warning"
+                  key={`${warning}-${index}`}
+                >
+                  <AlertTriangle size={16} />
+                  <span>{warning}</span>
+                </div>
+              ),
+            )}
           </div>
         </div>
       )}
@@ -360,16 +464,143 @@ function TradeReviewPanel({ setup, isTradeReady }) {
           </div>
 
           <div className="trade-review-check-list">
-            {preview.errors.map((error, index) => (
-              <div
-                className="trade-review-check error"
-                key={`${error}-${index}`}
-              >
-                <XCircle size={16} />
-                <span>{error}</span>
-              </div>
-            ))}
+            {preview.errors.map(
+              (error, index) => (
+                <div
+                  className="trade-review-check error"
+                  key={`${error}-${index}`}
+                >
+                  <XCircle size={16} />
+                  <span>{error}</span>
+                </div>
+              ),
+            )}
           </div>
+        </div>
+      )}
+
+      {approved && !intent && (
+        <div className="trade-review-intent-section">
+          <div className="trade-review-intent-header">
+            <div>
+              <span>Next safety step</span>
+              <strong>Create trade intent</strong>
+            </div>
+
+            <ShieldCheck size={21} />
+          </div>
+
+          <p>
+            The broker preview has passed. Creating an
+            intent reserves this reviewed trade parameters
+            for the protected confirmation workflow.
+          </p>
+
+          <button
+            type="button"
+            className="trade-review-preview-button"
+            onClick={createTradeIntent}
+            disabled={intentLoading}
+          >
+            {intentLoading ? (
+              <>
+                <LoaderCircle
+                  size={18}
+                  className="spin"
+                />
+                Creating trade intent...
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={18} />
+                Create trade intent
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {intentError && (
+        <div className="trade-review-result error">
+          <AlertTriangle size={19} />
+
+          <div>
+            <strong>Trade intent failed</strong>
+            <span>{intentError}</span>
+          </div>
+        </div>
+      )}
+
+      {intent && (
+        <div className="trade-review-result approved">
+          <CheckCircle2 size={21} />
+
+          <div>
+            <strong>TRADE INTENT CREATED</strong>
+
+            <span>
+              Intent #{intent.id ??
+                intent.intent_id ??
+                "--"} has been created successfully.
+            </span>
+
+            {(intent.expires_at ||
+              intent.expiry) && (
+              <span>
+                Expires:{" "}
+                {formatExpiry(
+                  intent.expires_at ||
+                    intent.expiry,
+                )}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {intent && (
+        <div className="trade-review-preview-grid">
+          <PreviewMetric
+            label="Intent ID"
+            value={
+              intent.id ??
+              intent.intent_id
+            }
+          />
+
+          <PreviewMetric
+            label="Status"
+            value={formatValue(intent.status)}
+          />
+
+          <PreviewMetric
+            label="Symbol"
+            value={
+              intent.broker_symbol ||
+              intent.symbol
+            }
+          />
+
+          <PreviewMetric
+            label="Direction"
+            value={formatValue(
+              intent.direction,
+            )}
+          />
+
+          <PreviewMetric
+            label="Volume"
+            value={formatNumber(
+              intent.volume,
+            )}
+          />
+
+          <PreviewMetric
+            label="Execution price"
+            value={formatNumber(
+              intent.execution_price,
+            )}
+          />
         </div>
       )}
 
@@ -378,10 +609,13 @@ function TradeReviewPanel({ setup, isTradeReady }) {
           <ShieldCheck size={18} />
 
           <span>
-            <strong>No MT5 order has been sent.</strong>{" "}
-            This is only an execution preview. Final
-            confirmation and the protected MT5 execution
-            pipeline remain separate.
+            <strong>
+              No MT5 order has been sent.
+            </strong>{" "}
+            This is only an execution preview and
+            trade-intent creation step. Final confirmation
+            remains behind the protected MT5 execution
+            pipeline.
           </span>
         </div>
       )}
@@ -393,6 +627,7 @@ function PreviewMetric({ label, value }) {
   return (
     <div className="trade-review-metric">
       <span>{label}</span>
+
       <strong>
         {value === null ||
         value === undefined ||
@@ -437,6 +672,20 @@ function formatValue(value) {
     .replace(/\b\w/g, (letter) =>
       letter.toUpperCase(),
     );
+}
+
+function formatExpiry(value) {
+  if (!value) {
+    return "--";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleString();
 }
 
 export default TradeReviewPanel;
