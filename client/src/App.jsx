@@ -28,6 +28,7 @@ import MarketsPage from "./MarketsPage";
 import AIAnalysisPage from "./AIAnalysisPage";
 import TradingPage from "./TradingPage";
 import LoginPage from "./LoginPage.jsx";
+import PositionsPage from "./PositionsPage.jsx";
 import "./App.css";
 
 const navigation = [
@@ -374,7 +375,7 @@ function TradingApplication() {
 
             <Route
               path="/positions"
-              element={<Positions />}
+              element={<PositionsPage />}
             />
 
             <Route
