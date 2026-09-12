@@ -26,6 +26,12 @@ function TradeReviewPanel({ setup, isTradeReady }) {
   const [intentLoading, setIntentLoading] = useState(false);
   const [intentError, setIntentError] = useState("");
 
+  const [confirmation, setConfirmation] = useState(null);
+  const [confirmationLoading, setConfirmationLoading] =
+    useState(false);
+  const [confirmationError, setConfirmationError] =
+    useState("");
+
   const canPreview =
     Boolean(isTradeReady) &&
     Number(volume) > 0 &&
@@ -43,6 +49,8 @@ function TradeReviewPanel({ setup, isTradeReady }) {
     setPreview(null);
     setIntent(null);
     setIntentError("");
+    setConfirmation(null);
+    setConfirmationError("");
 
     try {
       const response = await api.post(
@@ -81,12 +89,15 @@ function TradeReviewPanel({ setup, isTradeReady }) {
     setIntentLoading(true);
     setIntentError("");
     setIntent(null);
+    setConfirmation(null);
+    setConfirmationError("");
 
     try {
       const response = await api.post(
         "/api/trade-intents",
         {
           symbol: setup.symbol || "XAUUSD",
+
           broker_symbol:
             preview.broker_symbol ||
             setup.broker_symbol ||
@@ -156,7 +167,46 @@ function TradeReviewPanel({ setup, isTradeReady }) {
     }
   }
 
+  async function confirmTrade() {
+    const intentId =
+      intent?.id ?? intent?.intent_id ?? null;
+
+    if (!intentId || confirmationLoading) {
+      return;
+    }
+
+    setConfirmationLoading(true);
+    setConfirmationError("");
+    setConfirmation(null);
+
+    try {
+      const response = await api.post(
+        "/api/trade-confirmation",
+        {
+          intent_id: Number(intentId),
+        },
+      );
+
+      setConfirmation(response.data);
+    } catch (error) {
+      setConfirmationError(
+        error?.response?.data?.detail ||
+          error?.response?.data?.message ||
+          "Unable to confirm the trade.",
+      );
+    } finally {
+      setConfirmationLoading(false);
+    }
+  }
+
   const approved = Boolean(preview?.approved);
+
+  const intentId =
+    intent?.id ?? intent?.intent_id ?? null;
+
+  const executionSent = Boolean(
+    confirmation?.execution_sent,
+  );
 
   return (
     <section className="trading-panel trade-review-panel">
@@ -168,7 +218,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
         <div className="trade-review-lock">
           <ShieldCheck size={17} />
-          Preview only
+          Protected execution
         </div>
       </div>
 
@@ -181,9 +231,9 @@ function TradeReviewPanel({ setup, isTradeReady }) {
           </strong>
 
           <span>
-            This step validates the proposed trade against
-            the live broker environment. It does not send
-            an MT5 order.
+            The platform validates the proposed trade
+            against the live broker environment before
+            any execution can be requested.
           </span>
         </div>
       </div>
@@ -216,7 +266,9 @@ function TradeReviewPanel({ setup, isTradeReady }) {
             onChange={(event) =>
               setVolume(event.target.value)
             }
-            disabled={!isTradeReady || previewLoading}
+            disabled={
+              !isTradeReady || previewLoading
+            }
           />
         </label>
 
@@ -232,7 +284,9 @@ function TradeReviewPanel({ setup, isTradeReady }) {
             onChange={(event) =>
               setRiskPercent(event.target.value)
             }
-            disabled={!isTradeReady || previewLoading}
+            disabled={
+              !isTradeReady || previewLoading
+            }
           />
         </label>
 
@@ -240,7 +294,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
           <span>Direction</span>
 
           <strong>
-            {formatValue(setup?.direction)}
+            {formatDirection(setup?.direction)}
           </strong>
         </div>
 
@@ -492,7 +546,7 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
           <p>
             The broker preview has passed. Creating an
-            intent reserves this reviewed trade parameters
+            intent stores the reviewed trade parameters
             for the protected confirmation workflow.
           </p>
 
@@ -531,80 +585,236 @@ function TradeReviewPanel({ setup, isTradeReady }) {
         </div>
       )}
 
-      {intent && (
-        <div className="trade-review-result approved">
-          <CheckCircle2 size={21} />
+      {intent && !confirmation && (
+        <>
+          <div className="trade-review-result approved">
+            <CheckCircle2 size={21} />
+
+            <div>
+              <strong>
+                TRADE INTENT CREATED
+              </strong>
+
+              <span>
+                Intent #{intentId} has been created
+                successfully.
+              </span>
+
+              {intent.expires_at && (
+                <span>
+                  Expires:{" "}
+                  {formatExpiry(
+                    intent.expires_at,
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="trade-confirmation-card">
+            <div className="trade-confirmation-header">
+              <div>
+                <span>Final safety gate</span>
+                <h3>Confirm this trade</h3>
+              </div>
+
+              <ShieldCheck size={24} />
+            </div>
+
+            <div className="trade-confirmation-warning">
+              <AlertTriangle size={19} />
+
+              <div>
+                <strong>
+                  This is the final execution action.
+                </strong>
+
+                <span>
+                  Clicking Confirm &amp; Execute sends only
+                  the server-side trade intent ID. The
+                  server performs fresh ownership,
+                  expiry, broker validation, margin,
+                  price and MT5 safety checks before an
+                  order can be submitted.
+                </span>
+              </div>
+            </div>
+
+            <div className="trade-confirmation-grid">
+              <ConfirmationMetric
+                label="Intent"
+                value={`#${intentId}`}
+              />
+
+              <ConfirmationMetric
+                label="Symbol"
+                value={
+                  intent.broker_symbol ||
+                  intent.symbol
+                }
+              />
+
+              <ConfirmationMetric
+                label="Direction"
+                value={formatDirection(
+                  intent.direction,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Volume"
+                value={formatNumber(
+                  intent.volume,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Execution price"
+                value={formatNumber(
+                  intent.execution_price,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Stop loss"
+                value={formatNumber(
+                  intent.stop_loss,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Take profit"
+                value={formatNumber(
+                  intent.take_profit,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Risk %"
+                value={
+                  intent.risk_percent === null ||
+                  intent.risk_percent ===
+                    undefined
+                    ? "--"
+                    : `${formatNumber(
+                        intent.risk_percent,
+                      )}%`
+                }
+              />
+            </div>
+
+            <button
+              type="button"
+              className="trade-confirm-button"
+              onClick={confirmTrade}
+              disabled={
+                confirmationLoading ||
+                !intentId
+              }
+            >
+              {confirmationLoading ? (
+                <>
+                  <LoaderCircle
+                    size={19}
+                    className="spin"
+                  />
+                  Revalidating with broker...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck size={19} />
+                  Confirm &amp; Execute Trade
+                </>
+              )}
+            </button>
+
+            <div className="trade-confirmation-note">
+              <ShieldCheck size={17} />
+
+              <span>
+                <strong>Intent #{intentId}</strong>{" "}
+                is the only value sent by the final
+                confirmation action. The browser does not
+                submit the trade price, volume, SL or TP
+                directly to the execution endpoint.
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {confirmationError && (
+        <div className="trade-review-result error">
+          <AlertTriangle size={19} />
 
           <div>
-            <strong>TRADE INTENT CREATED</strong>
+            <strong>
+              Confirmation failed
+            </strong>
+
+            <span>{confirmationError}</span>
+          </div>
+        </div>
+      )}
+
+      {confirmation && (
+        <div
+          className={`trade-confirmation-result ${
+            executionSent
+              ? "executed"
+              : "rejected"
+          }`}
+        >
+          {executionSent ? (
+            <CheckCircle2 size={24} />
+          ) : (
+            <XCircle size={24} />
+          )}
+
+          <div>
+            <strong>
+              {executionSent
+                ? "TRADE EXECUTED"
+                : "TRADE NOT EXECUTED"}
+            </strong>
 
             <span>
-              Intent #{intent.id ??
-                intent.intent_id ??
-                "--"} has been created successfully.
+              {confirmation.message ||
+                "Trade confirmation completed."}
             </span>
 
-            {(intent.expires_at ||
-              intent.expiry) && (
+            <span>
+              Status:{" "}
+              {formatValue(
+                confirmation.status,
+              )}
+            </span>
+
+            {confirmation.order_ticket && (
               <span>
-                Expires:{" "}
-                {formatExpiry(
-                  intent.expires_at ||
-                    intent.expiry,
-                )}
+                Order ticket:{" "}
+                {confirmation.order_ticket}
+              </span>
+            )}
+
+            {confirmation.deal_ticket && (
+              <span>
+                Deal ticket:{" "}
+                {confirmation.deal_ticket}
+              </span>
+            )}
+
+            {confirmation.retcode_description && (
+              <span>
+                Broker result:{" "}
+                {confirmation.retcode_description}
               </span>
             )}
           </div>
         </div>
       )}
 
-      {intent && (
-        <div className="trade-review-preview-grid">
-          <PreviewMetric
-            label="Intent ID"
-            value={
-              intent.id ??
-              intent.intent_id
-            }
-          />
-
-          <PreviewMetric
-            label="Status"
-            value={formatValue(intent.status)}
-          />
-
-          <PreviewMetric
-            label="Symbol"
-            value={
-              intent.broker_symbol ||
-              intent.symbol
-            }
-          />
-
-          <PreviewMetric
-            label="Direction"
-            value={formatValue(
-              intent.direction,
-            )}
-          />
-
-          <PreviewMetric
-            label="Volume"
-            value={formatNumber(
-              intent.volume,
-            )}
-          />
-
-          <PreviewMetric
-            label="Execution price"
-            value={formatNumber(
-              intent.execution_price,
-            )}
-          />
-        </div>
-      )}
-
-      {preview && (
+      {preview && !executionSent && (
         <div className="trade-review-final-lock">
           <ShieldCheck size={18} />
 
@@ -612,10 +822,9 @@ function TradeReviewPanel({ setup, isTradeReady }) {
             <strong>
               No MT5 order has been sent.
             </strong>{" "}
-            This is only an execution preview and
-            trade-intent creation step. Final confirmation
-            remains behind the protected MT5 execution
-            pipeline.
+            The execution pipeline remains protected
+            by server-side validation and MT5
+            order_check() before order submission.
           </span>
         </div>
       )}
@@ -626,6 +835,25 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 function PreviewMetric({ label, value }) {
   return (
     <div className="trade-review-metric">
+      <span>{label}</span>
+
+      <strong>
+        {value === null ||
+        value === undefined ||
+        value === ""
+          ? "--"
+          : value}
+      </strong>
+    </div>
+  );
+}
+
+function ConfirmationMetric({
+  label,
+  value,
+}) {
+  return (
+    <div className="trade-confirmation-metric">
       <span>{label}</span>
 
       <strong>
@@ -669,9 +897,33 @@ function formatValue(value) {
 
   return String(value)
     .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) =>
-      letter.toUpperCase(),
+    .replace(/\b\w/g, (character) =>
+      character.toUpperCase(),
     );
+}
+
+function formatDirection(value) {
+  const normalized = String(
+    value || "",
+  ).toLowerCase();
+
+  if (
+    normalized === "long" ||
+    normalized === "buy" ||
+    normalized === "bullish"
+  ) {
+    return "Long / Buy";
+  }
+
+  if (
+    normalized === "short" ||
+    normalized === "sell" ||
+    normalized === "bearish"
+  ) {
+    return "Short / Sell";
+  }
+
+  return "Neutral";
 }
 
 function formatExpiry(value) {
