@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -426,10 +426,58 @@ function ConnectionStatus({ label, status }) {
   );
 }
 
+function AccountMetric({
+  label,
+  value,
+  suffix = "",
+  prefix = "",
+  profit = false,
+}) {
+  const numericValue =
+    value === null ||
+    value === undefined ||
+    value === ""
+      ? null
+      : Number(value);
+
+  const displayValue =
+    numericValue === null ||
+    Number.isNaN(numericValue)
+      ? "--"
+      : `${prefix}${numericValue.toLocaleString(
+          undefined,
+          {
+            minimumFractionDigits:
+              numericValue % 1 === 0 ? 0 : 2,
+            maximumFractionDigits: 2,
+          },
+        )}${suffix}`;
+
+  const profitClass =
+    profit && numericValue !== null
+      ? numericValue > 0
+        ? "account-profit-positive"
+        : numericValue < 0
+          ? "account-profit-negative"
+          : ""
+      : "";
+
+  return (
+    <div className="account-metric-card">
+      <span>{label}</span>
+
+      <strong className={profitClass}>
+        {displayValue}
+      </strong>
+    </div>
+  );
+}
 function CommandCenter() {
   const [prices, setPrices] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [mtf, setMtf] = useState(null);
+  const [accountStatus, setAccountStatus] = useState(null);
+  const [positionSummary, setPositionSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -444,6 +492,8 @@ function CommandCenter() {
           priceResponse,
           analysisResponse,
           mtfResponse,
+          accountResponse,
+          positionsResponse,
         ] = await Promise.all([
           api.get(
             "/api/mt5/market-data/ticks",
@@ -473,6 +523,14 @@ function CommandCenter() {
               },
             },
           ),
+
+          api.get(
+            "/api/mt5/status",
+          ),
+
+          api.get(
+            "/api/mt5/positions/summary",
+          ),
         ]);
 
         if (!mounted) {
@@ -482,6 +540,8 @@ function CommandCenter() {
         setPrices(priceResponse.data);
         setAnalysis(analysisResponse.data);
         setMtf(mtfResponse.data);
+        setAccountStatus(accountResponse.data);
+        setPositionSummary(positionsResponse.data);
       } catch (requestError) {
         if (!mounted) {
           return;
@@ -537,6 +597,33 @@ function CommandCenter() {
     aiConfidence,
   );
 
+  const account = accountStatus || {};
+
+  const accountBalance =
+    account.balance ?? null;
+
+  const accountEquity =
+    account.equity ?? null;
+
+  const accountFreeMargin =
+    account.free_margin ?? null;
+
+  const accountMargin =
+    account.margin ?? null;
+
+  const accountMarginLevel =
+    account.margin_level ?? null;
+
+  const openPositions =
+    positionSummary?.position_count ??
+    positionSummary?.count ??
+    0;
+
+  const floatingProfit =
+    positionSummary?.floating_profit ??
+    positionSummary?.profit ??
+    0;
+
   return (
     <section className="page">
       <PageHeading
@@ -557,7 +644,7 @@ function CommandCenter() {
           <div className="decision-main">
             <div>
               <span className="instrument-label">
-                XAUUSD Â· 15m
+                XAUUSD Ã‚Â· 15m
               </span>
 
               <h2 className={biasClass(aiBias)}>
@@ -640,6 +727,71 @@ function CommandCenter() {
         </section>
       </div>
 
+      <div className="section-title-row account-snapshot-heading">
+        <div>
+          <span className="card-label">
+            Live account
+          </span>
+
+          <h3>MT5 account snapshot</h3>
+        </div>
+
+        <span className="account-live-badge">
+          <span className="live-indicator" />
+          Live
+        </span>
+      </div>
+
+      <div className="account-snapshot-grid">
+        <AccountMetric
+          label="Balance"
+          value={accountBalance}
+          suffix=" USD"
+        />
+
+        <AccountMetric
+          label="Equity"
+          value={accountEquity}
+          suffix=" USD"
+        />
+
+        <AccountMetric
+          label="Free margin"
+          value={accountFreeMargin}
+          suffix=" USD"
+        />
+
+        <AccountMetric
+          label="Used margin"
+          value={accountMargin}
+          suffix=" USD"
+        />
+
+        <AccountMetric
+          label="Margin level"
+          value={accountMarginLevel}
+          suffix="%"
+        />
+
+        <AccountMetric
+          label="Open positions"
+          value={openPositions}
+        />
+
+        <AccountMetric
+          label="Floating P/L"
+          value={floatingProfit}
+          suffix=" USD"
+          profit
+        />
+
+        <AccountMetric
+          label="Leverage"
+          value={account.leverage}
+          prefix="1:"
+        />
+      </div>
+
       <div className="section-title-row">
         <div>
           <span className="card-label">
@@ -683,7 +835,7 @@ function CommandCenter() {
           <div>
             <h3>Multi-timeframe context</h3>
             <span>
-              XAUUSD Â· live MT5 analysis
+              XAUUSD Ã‚Â· live MT5 analysis
             </span>
           </div>
         </div>
@@ -995,7 +1147,7 @@ function Positions() {
           </strong>
 
           <span>
-            Auto-refreshing every 5 seconds Â·
+            Auto-refreshing every 5 seconds Ã‚Â·
             AI-managed positions only
           </span>
         </div>
@@ -1227,7 +1379,7 @@ function LivePositionCard({
 
       <div className="position-card-footer">
         <span>
-          MT5 Â· AI managed
+          MT5 Ã‚Â· AI managed
         </span>
 
         <span>
@@ -2003,20 +2155,20 @@ function getDecision(
       normalized,
     )
   ) {
-    return "WAIT â€” NO CLEAR DIRECTION";
+    return "WAIT Ã¢â‚¬â€ NO CLEAR DIRECTION";
   }
 
   if (numericConfidence < 50) {
-    return "WAIT â€” LOW CONFIDENCE";
+    return "WAIT Ã¢â‚¬â€ LOW CONFIDENCE";
   }
 
   if (numericConfidence < 65) {
-    return "WAIT â€” CONFIRMATION REQUIRED";
+    return "WAIT Ã¢â‚¬â€ CONFIRMATION REQUIRED";
   }
 
   return `${formatBias(
     normalized,
-  )} BIAS â€” SETUP CONFIRMATION REQUIRED`;
+  )} BIAS Ã¢â‚¬â€ SETUP CONFIRMATION REQUIRED`;
 }
 
 function biasClass(value) {
@@ -2140,7 +2292,7 @@ function formatList(value) {
   return value
     .filter(Boolean)
     .map(formatBias)
-    .join(" Â· ");
+    .join(" Ã‚Â· ");
 }
 
 function formatScores(scores) {
@@ -2156,7 +2308,7 @@ function formatScores(scores) {
 
   return `Bullish ${bullish.toFixed(
     2,
-  )} Â· Bearish ${bearish.toFixed(2)}`;
+  )} Ã‚Â· Bearish ${bearish.toFixed(2)}`;
 }
 
 function formatNestedTrend(
@@ -2198,7 +2350,7 @@ function formatNestedTrend(
 
     return `${formatBias(
       trend,
-    )} Â· latest ${formatBias(
+    )} Ã‚Â· latest ${formatBias(
       direction,
     )} ${formatBias(eventType)}`;
   }
@@ -2227,7 +2379,7 @@ function describeLiquidity(
   const latest =
     sweeps[sweeps.length - 1];
 
-  return `${sweeps.length} liquidity sweep(s) detected Â· latest ${formatBias(
+  return `${sweeps.length} liquidity sweep(s) detected Ã‚Â· latest ${formatBias(
     latest.direction ||
       "neutral",
   )}`;
@@ -2285,8 +2437,9 @@ function describeSupportResistance(
         )}`
       : "Resistance unavailable";
 
-  return `${supportText} Â· ${resistanceText}`;
+  return `${supportText} Ã‚Â· ${resistanceText}`;
 }
 
 export default App;
+
 
