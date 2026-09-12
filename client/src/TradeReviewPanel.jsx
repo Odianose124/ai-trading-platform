@@ -785,10 +785,57 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
             <span>
               Status:{" "}
-              {formatValue(
-                confirmation.status,
-              )}
+              {formatValue(confirmation.status)}
             </span>
+
+            <div className="trade-confirmation-diagnostics">
+              <ConfirmationMetric
+                label="Broker symbol"
+                value={confirmation.broker_symbol}
+              />
+
+              <ConfirmationMetric
+                label="Direction"
+                value={formatDirection(
+                  confirmation.direction,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Volume"
+                value={formatNumber(
+                  confirmation.volume,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Execution price"
+                value={formatNumber(
+                  confirmation.execution_price,
+                )}
+              />
+
+              <ConfirmationMetric
+                label="Retcode"
+                value={confirmation.retcode}
+              />
+
+              <ConfirmationMetric
+                label="Execution sent"
+                value={
+                  confirmation.execution_sent
+                    ? "YES"
+                    : "NO"
+                }
+              />
+            </div>
+
+            {confirmation.retcode_description && (
+              <span>
+                Broker result:{" "}
+                {confirmation.retcode_description}
+              </span>
+            )}
 
             {confirmation.order_ticket && (
               <span>
@@ -804,27 +851,70 @@ function TradeReviewPanel({ setup, isTradeReady }) {
               </span>
             )}
 
-            {confirmation.retcode_description && (
-              <span>
-                Broker result:{" "}
-                {confirmation.retcode_description}
-              </span>
-            )}
+            {Array.isArray(confirmation.errors) &&
+              confirmation.errors.length > 0 && (
+                <div className="trade-confirmation-diagnostics-list errors">
+                  <strong>Execution errors</strong>
+
+                  {confirmation.errors.map(
+                    (item, index) => (
+                      <span
+                        key={`confirmation-error-${index}`}
+                      >
+                        {item}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
+
+            {Array.isArray(confirmation.warnings) &&
+              confirmation.warnings.length > 0 && (
+                <div className="trade-confirmation-diagnostics-list warnings">
+                  <strong>Execution warnings</strong>
+
+                  {confirmation.warnings.map(
+                    (item, index) => (
+                      <span
+                        key={`confirmation-warning-${index}`}
+                      >
+                        {item}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
+
+            {Array.isArray(confirmation.checks) &&
+              confirmation.checks.length > 0 && (
+                <div className="trade-confirmation-diagnostics-list checks">
+                  <strong>Final safety checks</strong>
+
+                  {confirmation.checks.map(
+                    (item, index) => (
+                      <span
+                        key={`confirmation-check-${index}`}
+                      >
+                        {item}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
           </div>
         </div>
       )}
-
-      {preview && !executionSent && (
+      {preview && !confirmation && (
         <div className="trade-review-final-lock">
           <ShieldCheck size={18} />
 
           <span>
             <strong>
-              No MT5 order has been sent.
+              No MT5 execution has been confirmed yet.
             </strong>{" "}
-            The execution pipeline remains protected
-            by server-side validation and MT5
-            order_check() before order submission.
+            The execution pipeline remains protected by
+            server-side validation and MT5 order_check()
+            before order submission.
           </span>
         </div>
       )}

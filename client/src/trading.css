@@ -1146,3 +1146,72 @@
   background: #fef2f2 !important;
   color: #991b1b !important;
 }
+/* TRADE CONFIRMATION DIAGNOSTICS */
+
+.trade-confirmation-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.trade-confirmation-diagnostics .trade-confirmation-metric {
+  margin: 0;
+}
+
+.trade-confirmation-diagnostics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.trade-confirmation-diagnostics-list strong {
+  color: #0f172a !important;
+}
+
+.trade-confirmation-diagnostics-list span {
+  color: #475569 !important;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.trade-confirmation-diagnostics-list.errors {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.trade-confirmation-diagnostics-list.errors strong,
+.trade-confirmation-diagnostics-list.errors span {
+  color: #991b1b !important;
+}
+
+.trade-confirmation-diagnostics-list.warnings {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.trade-confirmation-diagnostics-list.warnings strong,
+.trade-confirmation-diagnostics-list.warnings span {
+  color: #92400e !important;
+}
+
+.trade-confirmation-diagnostics-list.checks {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.trade-confirmation-diagnostics-list.checks strong,
+.trade-confirmation-diagnostics-list.checks span {
+  color: #166534 !important;
+}
+
+@media (max-width: 640px) {
+  .trade-confirmation-diagnostics {
+    grid-template-columns: 1fr;
+  }
+}

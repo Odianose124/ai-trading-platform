@@ -114,7 +114,10 @@ function TradingPage() {
   }, [setupStatus, setup]);
 
   const direction = String(
-    setup?.direction || "neutral",
+    setup?.direction ||
+      setup?.execution_direction ||
+      setup?.trade_direction ||
+      "neutral",
   ).toLowerCase();
 
   const marketCondition =
@@ -145,10 +148,16 @@ function TradingPage() {
     setup?.take_profit_2 ?? null;
 
   const rr1 =
-    setup?.risk_reward_1 ?? null;
+    setup?.risk_reward_1 ??
+    setup?.risk_reward_tp1 ??
+    setup?.rr_tp1 ??
+    null;
 
   const rr2 =
-    setup?.risk_reward_2 ?? null;
+    setup?.risk_reward_2 ??
+    setup?.risk_reward_tp2 ??
+    setup?.rr_tp2 ??
+    null;
 
   const warnings = Array.isArray(setup?.warnings)
     ? setup.warnings
@@ -843,3 +852,4 @@ function formatConfirmation(value) {
 }
 
 export default TradingPage;
+
