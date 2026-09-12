@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -302,16 +302,45 @@ class MT5ExecutionService:
             or 0
         )
 
-        # The broker validation service has already confirmed
-        # the broker filling mode. Use it directly.
-        if filling_mode:
-            return filling_mode
+        # MetaTrader 5 exposes symbol_info.filling_mode
+        # as a capability bitmask, not as the value that
+        # should be passed directly to request["type_filling"].
+        #
+        # Example:
+        #   filling_mode == 3
+        # means IOC + FOK are supported.
+        #
+        # MT5 request type_filling must instead receive
+        # ORDER_FILLING_IOC or ORDER_FILLING_FOK.
 
-        # Fallback to IOC if the broker reports no explicit mode.
-        return getattr(
+        if filling_mode & getattr(
             mt5,
             "ORDER_FILLING_IOC",
             1,
+        ):
+            return getattr(
+                mt5,
+                "ORDER_FILLING_IOC",
+                1,
+            )
+
+        if filling_mode & getattr(
+            mt5,
+            "ORDER_FILLING_FOK",
+            0,
+        ):
+            return getattr(
+                mt5,
+                "ORDER_FILLING_FOK",
+                0,
+            )
+
+        # Only use RETURN when the broker does not expose
+        # the IOC/FOK capability flags.
+        return getattr(
+            mt5,
+            "ORDER_FILLING_RETURN",
+            2,
         )
 
     def execute(
