@@ -646,7 +646,7 @@ function CommandCenter() {
           <div className="decision-main">
             <div>
               <span className="instrument-label">
-                XAUUSD Ã‚Â· 15m
+                XAUUSD · 15m
               </span>
 
               <h2 className={biasClass(aiBias)}>
@@ -837,7 +837,7 @@ function CommandCenter() {
           <div>
             <h3>Multi-timeframe context</h3>
             <span>
-              XAUUSD Ã‚Â· live MT5 analysis
+              XAUUSD · live MT5 analysis
             </span>
           </div>
         </div>
@@ -1149,7 +1149,7 @@ function Positions() {
           </strong>
 
           <span>
-            Auto-refreshing every 5 seconds Ã‚Â·
+            Auto-refreshing every 5 seconds ·
             AI-managed positions only
           </span>
         </div>
@@ -1381,7 +1381,7 @@ function LivePositionCard({
 
       <div className="position-card-footer">
         <span>
-          MT5 Ã‚Â· AI managed
+          MT5 · AI managed
         </span>
 
         <span>
@@ -2157,20 +2157,20 @@ function getDecision(
       normalized,
     )
   ) {
-    return "WAIT Ã¢â‚¬â€ NO CLEAR DIRECTION";
+    return "WAIT — NO CLEAR DIRECTION";
   }
 
   if (numericConfidence < 50) {
-    return "WAIT Ã¢â‚¬â€ LOW CONFIDENCE";
+    return "WAIT — LOW CONFIDENCE";
   }
 
   if (numericConfidence < 65) {
-    return "WAIT Ã¢â‚¬â€ CONFIRMATION REQUIRED";
+    return "WAIT — CONFIRMATION REQUIRED";
   }
 
   return `${formatBias(
     normalized,
-  )} BIAS Ã¢â‚¬â€ SETUP CONFIRMATION REQUIRED`;
+  )} BIAS — SETUP CONFIRMATION REQUIRED`;
 }
 
 function biasClass(value) {
@@ -2294,7 +2294,7 @@ function formatList(value) {
   return value
     .filter(Boolean)
     .map(formatBias)
-    .join(" Ã‚Â· ");
+    .join(" · ");
 }
 
 function formatScores(scores) {
@@ -2310,7 +2310,7 @@ function formatScores(scores) {
 
   return `Bullish ${bullish.toFixed(
     2,
-  )} Ã‚Â· Bearish ${bearish.toFixed(2)}`;
+  )} · Bearish ${bearish.toFixed(2)}`;
 }
 
 function formatNestedTrend(
@@ -2352,7 +2352,7 @@ function formatNestedTrend(
 
     return `${formatBias(
       trend,
-    )} Ã‚Â· latest ${formatBias(
+    )} · latest ${formatBias(
       direction,
     )} ${formatBias(eventType)}`;
   }
@@ -2381,7 +2381,7 @@ function describeLiquidity(
   const latest =
     sweeps[sweeps.length - 1];
 
-  return `${sweeps.length} liquidity sweep(s) detected Ã‚Â· latest ${formatBias(
+  return `${sweeps.length} liquidity sweep(s) detected · latest ${formatBias(
     latest.direction ||
       "neutral",
   )}`;
@@ -2439,7 +2439,7 @@ function describeSupportResistance(
         )}`
       : "Resistance unavailable";
 
-  return `${supportText} Ã‚Â· ${resistanceText}`;
+  return `${supportText} · ${resistanceText}`;
 }
 
 export default App;
