@@ -597,7 +597,8 @@ function CommandCenter() {
     aiConfidence,
   );
 
-  const account = accountStatus || {};
+  const account =
+    accountStatus?.account || {};
 
   const accountBalance =
     account.balance ?? null;
@@ -612,16 +613,17 @@ function CommandCenter() {
     account.margin ?? null;
 
   const accountMarginLevel =
-    account.margin_level ?? null;
+    accountMargin && Number(accountMargin) > 0
+      ? (Number(accountEquity || 0) / Number(accountMargin)) * 100
+      : null;
 
   const openPositions =
-    positionSummary?.position_count ??
+    positionSummary?.open_trades ??
     positionSummary?.count ??
     0;
 
   const floatingProfit =
     positionSummary?.floating_profit ??
-    positionSummary?.profit ??
     0;
 
   return (
@@ -2441,5 +2443,6 @@ function describeSupportResistance(
 }
 
 export default App;
+
 
 
