@@ -380,7 +380,7 @@ function TradingApplication() {
 
             <Route
               path="/history"
-              element={<TradeHistory />}
+              element={<TradeHistoryPage />}
             />
 
             <Route
