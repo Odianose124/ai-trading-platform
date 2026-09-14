@@ -42,3 +42,4 @@ def create_database_tables():
 # Import models after Base has been defined so SQLAlchemy
 # registers them in Base.metadata without creating a circular import.
 from app.models.trade_intent import TradeIntent  # noqa: E402, F401
+from app.models.user_settings import UserSettings # noqa: E402, F401

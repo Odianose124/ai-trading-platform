@@ -1410,463 +1410,401 @@ function TradeHistory() {
 }
 
 function SettingsPage() {
-  const [data, setData] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [action, setAction] = useState("");
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  async function loadStatus(manualRefresh = false) {
+  const loadSettings = async () => {
     try {
-      if (manualRefresh) {
-        setRefreshing(true);
-      }
-
+      setLoading(true);
       setError("");
-      setMessage("");
 
-      const response = await api.get(
-        "/api/mt5/status",
-      );
-
-      setData(response.data);
-    } catch (requestError) {
-      setData(null);
-
+      const response = await api.get("/api/settings");
+      setSettings(response.data);
+    } catch (err) {
+      console.error("Failed to load trading settings:", err);
       setError(
-        requestError?.response?.data?.detail ||
-          "Unable to load MetaTrader 5 status.",
+        err?.response?.data?.detail ||
+          "Unable to load trading preferences.",
       );
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  }
-
-  async function connectMT5() {
-    try {
-      setAction("connect");
-      setError("");
-      setMessage("");
-
-      const response = await api.post(
-        "/api/mt5/connect",
-      );
-
-      setData(response.data);
-
-      setMessage(
-        "MetaTrader 5 connected successfully.",
-      );
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.detail ||
-          "Unable to connect to MetaTrader 5.",
-      );
-    } finally {
-      setAction("");
-    }
-  }
-
-  async function disconnectMT5() {
-    try {
-      setAction("disconnect");
-      setError("");
-      setMessage("");
-
-      const response = await api.post(
-        "/api/mt5/disconnect",
-      );
-
-      setData({
-        connected: false,
-      });
-
-      setMessage(
-        response?.data?.message ||
-          "MetaTrader 5 disconnected.",
-      );
-    } catch (requestError) {
-      setError(
-        requestError?.response?.data?.detail ||
-          "Unable to disconnect MetaTrader 5.",
-      );
-    } finally {
-      setAction("");
-    }
-  }
+  };
 
   useEffect(() => {
-    loadStatus();
-
-    const interval = window.setInterval(
-      () => loadStatus(false),
-      15000,
-    );
-
-    return () =>
-      window.clearInterval(interval);
+    loadSettings();
   }, []);
 
-  const connected =
-    data?.connected === true;
+  const updateField = (field, value) => {
+    setSettings((current) => ({
+      ...current,
+      [field]: value,
+    }));
 
-  const account = data?.account || {};
-  const terminal = data?.terminal || {};
-  const version = data?.version || {};
+    setMessage("");
+    setError("");
+  };
+
+  const saveSettings = async () => {
+    if (!settings) {
+      return;
+    }
+
+    const risk = Number(settings.risk_percent);
+    const maxRisk = Number(settings.max_risk_percent);
+    const maxOpenTrades = Number(settings.max_open_trades);
+
+    if (!Number.isFinite(risk) || risk < 0.1 || risk > 10) {
+      setError("Default risk must be between 0.1% and 10%.");
+      return;
+    }
+
+    if (!Number.isFinite(maxRisk) || maxRisk < 0.1 || maxRisk > 20) {
+      setError("Maximum risk must be between 0.1% and 20%.");
+      return;
+    }
+
+    if (maxRisk < risk) {
+      setError("Maximum risk cannot be lower than default risk.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(maxOpenTrades) ||
+      maxOpenTrades < 1 ||
+      maxOpenTrades > 20
+    ) {
+      setError("Maximum open trades must be between 1 and 20.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setMessage("");
+      setError("");
+
+      const response = await api.put("/api/settings", {
+        risk_percent: risk,
+        max_risk_percent: maxRisk,
+        preferred_timeframe: settings.preferred_timeframe,
+        max_open_trades: maxOpenTrades,
+        auto_trading_enabled: Boolean(
+          settings.auto_trading_enabled,
+        ),
+        require_trade_confirmation: Boolean(
+          settings.require_trade_confirmation,
+        ),
+      });
+
+      setSettings(response.data);
+      setMessage("Trading preferences saved successfully.");
+    } catch (err) {
+      console.error("Failed to save trading settings:", err);
+
+      setError(
+        err?.response?.data?.detail ||
+          "Unable to save trading preferences.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <section className="page-shell">
+        <div className="page-heading">
+          <div>
+            <span className="eyebrow">Trading configuration</span>
+            <h1>Settings</h1>
+            <p>
+              Loading your trading preferences...
+            </p>
+          </div>
+        </div>
+
+        <div className="analysis-panel">
+          <div className="reasoning-content">
+            <p>Loading settings from the trading server...</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (!settings) {
+    return (
+      <section className="page-shell">
+        <div className="page-heading">
+          <div>
+            <span className="eyebrow">Trading configuration</span>
+            <h1>Settings</h1>
+            <p>
+              Your trading preferences could not be loaded.
+            </p>
+          </div>
+        </div>
+
+        <div className="analysis-panel">
+          <div className="reasoning-content">
+            <div className="settings-message error">
+              {error || "Unable to load settings."}
+            </div>
+
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={loadSettings}
+            >
+              <RefreshCw size={16} />
+              Retry
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="page">
-      <div className="page-heading-row">
-        <PageHeading
-          eyebrow="Settings"
-          title="Platform settings"
-          description="Manage the MetaTrader 5 connection and view the live trading account configuration."
-        />
+    <section className="page-shell">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Trading configuration</span>
+          <h1>Settings</h1>
+          <p>
+            Manage your trading preferences and execution safety
+            controls.
+          </p>
+        </div>
 
         <button
           className="secondary-button"
-          onClick={() => loadStatus(true)}
-          disabled={refreshing}
+          type="button"
+          onClick={loadSettings}
+          disabled={saving}
         >
-          <RefreshCw
-            size={17}
-            className={
-              refreshing
-                ? "spin-animation"
-                : ""
-            }
-          />
-
-          {refreshing
-            ? "Refreshing..."
-            : "Refresh"}
+          <RefreshCw size={16} />
+          Refresh
         </button>
       </div>
 
-      {error && (
-        <ErrorBanner message={error} />
-      )}
-
       {message && (
-        <div className="live-source-banner">
-          <span className="live-indicator" />
-
-          <div>
-            <strong>{message}</strong>
-
-            <span>
-              MetaTrader 5 connection status
-              updated successfully.
-            </span>
-          </div>
+        <div className="settings-message success">
+          {message}
         </div>
       )}
 
-      <div className="live-source-banner">
-        <span
-          className={`live-indicator ${
-            connected ? "" : "status-offline"
-          }`}
-        />
-
-        <div>
-          <strong>
-            MetaTrader 5
-          </strong>
-
-          <span>
-            {loading
-              ? "Checking terminal connection..."
-              : connected
-                ? "Connected to live MT5 terminal"
-                : "MT5 terminal is currently unavailable"}
-          </span>
+      {error && (
+        <div className="settings-message error">
+          {error}
         </div>
-
-        <strong
-          className={
-            connected
-              ? "profit-positive"
-              : "profit-negative"
-          }
-        >
-          {loading
-            ? "Checking..."
-            : connected
-              ? "CONNECTED"
-              : "DISCONNECTED"}
-        </strong>
-      </div>
+      )}
 
       <div className="settings-grid">
-        <div className="settings-card">
-          <div className="settings-icon">
+        <div className="analysis-panel">
+          <div className="panel-heading">
             <ShieldCheck size={20} />
+
+            <div>
+              <h3>Risk controls</h3>
+              <span>
+                These values are stored against your account and
+                will be used by the trading engine.
+              </span>
+            </div>
           </div>
 
-          <div>
-            <h3>Connection control</h3>
+          <div className="settings-form">
+            <label className="settings-field">
+              <span>Default risk per trade (%)</span>
+              <input
+                type="number"
+                min="0.1"
+                max="10"
+                step="0.1"
+                value={settings.risk_percent}
+                onChange={(event) =>
+                  updateField(
+                    "risk_percent",
+                    event.target.value,
+                  )
+                }
+              />
+              <small>
+                Normal maximum risk allocated to a single AI
+                trade.
+              </small>
+            </label>
 
-            <p>
-              Connect or disconnect the platform
-              from the MetaTrader 5 terminal.
-            </p>
+            <label className="settings-field">
+              <span>Maximum risk per trade (%)</span>
+              <input
+                type="number"
+                min="0.1"
+                max="20"
+                step="0.1"
+                value={settings.max_risk_percent}
+                onChange={(event) =>
+                  updateField(
+                    "max_risk_percent",
+                    event.target.value,
+                  )
+                }
+              />
+              <small>
+                Hard user preference ceiling. Server validation
+                still applies.
+              </small>
+            </label>
 
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                flexWrap: "wrap",
-                marginTop: "16px",
-              }}
-            >
-              <button
-                className="secondary-button"
-                onClick={connectMT5}
-                disabled={
-                  action !== "" ||
-                  connected
+            <label className="settings-field">
+              <span>Maximum open trades</span>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                step="1"
+                value={settings.max_open_trades}
+                onChange={(event) =>
+                  updateField(
+                    "max_open_trades",
+                    event.target.value,
+                  )
+                }
+              />
+              <small>
+                Limits the number of simultaneously open AI
+                trades for your account.
+              </small>
+            </label>
+
+            <label className="settings-field">
+              <span>Preferred analysis timeframe</span>
+              <select
+                value={settings.preferred_timeframe}
+                onChange={(event) =>
+                  updateField(
+                    "preferred_timeframe",
+                    event.target.value,
+                  )
                 }
               >
-                <Activity size={17} />
+                <option value="1m">1 Minute</option>
+                <option value="5m">5 Minutes</option>
+                <option value="15m">15 Minutes</option>
+                <option value="1h">1 Hour</option>
+                <option value="4h">4 Hours</option>
+              </select>
 
-                {action === "connect"
-                  ? "Connecting..."
-                  : connected
-                    ? "Already connected"
-                    : "Connect MT5"}
-              </button>
-
-              <button
-                className="secondary-button"
-                onClick={disconnectMT5}
-                disabled={
-                  action !== "" ||
-                  !connected
-                }
-              >
-                <PanelLeftClose size={17} />
-
-                {action === "disconnect"
-                  ? "Disconnecting..."
-                  : "Disconnect MT5"}
-              </button>
-            </div>
+              <small>
+                The preferred timeframe for your trading
+                workflow.
+              </small>
+            </label>
           </div>
         </div>
 
-        <div className="settings-card">
-          <div className="settings-icon">
-            <Bot size={20} />
+        <div className="analysis-panel">
+          <div className="panel-heading">
+            <Settings size={20} />
+
+            <div>
+              <h3>Execution preferences</h3>
+              <span>
+                Safety settings controlling how trades are
+                handled.
+              </span>
+            </div>
           </div>
 
-          <div>
-            <h3>AI trading safety</h3>
+          <div className="settings-form">
+            <div className="settings-toggle">
+              <div>
+                <strong>Require trade confirmation</strong>
+                <small>
+                  Keep the explicit confirmation step before an
+                  MT5 order can be sent.
+                </small>
+              </div>
 
-            <p>
-              The execution layer remains responsible
-              for trade validation, risk controls and
-              AI-managed execution decisions.
-            </p>
+              <button
+                type="button"
+                className={
+                  settings.require_trade_confirmation
+                    ? "toggle active"
+                    : "toggle"
+                }
+                onClick={() =>
+                  updateField(
+                    "require_trade_confirmation",
+                    !settings.require_trade_confirmation,
+                  )
+                }
+                aria-pressed={
+                  settings.require_trade_confirmation
+                }
+              >
+                <span />
+              </button>
+            </div>
+
+            <div className="settings-toggle">
+              <div>
+                <strong>Automatic trading</strong>
+                <small>
+                  Enable the automatic-trading preference.
+                  Server-side execution safeguards remain
+                  active.
+                </small>
+              </div>
+
+              <button
+                type="button"
+                className={
+                  settings.auto_trading_enabled
+                    ? "toggle active"
+                    : "toggle"
+                }
+                onClick={() =>
+                  updateField(
+                    "auto_trading_enabled",
+                    !settings.auto_trading_enabled,
+                  )
+                }
+                aria-pressed={settings.auto_trading_enabled}
+              >
+                <span />
+              </button>
+            </div>
+
+            <div className="settings-safety-card">
+              <ShieldCheck size={18} />
+
+              <div>
+                <strong>Trading safety</strong>
+                <p>
+                  Final trade validation remains on the server.
+                  These preferences do not bypass broker checks,
+                  risk controls, margin validation, price
+                  deviation protection, or MT5 pre-flight checks.
+                </p>
+              </div>
+            </div>
+
+            <button
+              className="primary-button settings-save-button"
+              type="button"
+              onClick={saveSettings}
+              disabled={saving}
+            >
+              {saving ? "Saving..." : "Save Trading Preferences"}
+            </button>
           </div>
         </div>
       </div>
-
-      {connected && (
-        <>
-          <div className="section-title-row">
-            <div>
-              <span className="card-label">
-                Live account
-              </span>
-
-              <h3>
-                MetaTrader 5 account
-              </h3>
-            </div>
-          </div>
-
-          <div className="position-summary-grid">
-            <PositionSummaryCard
-              label="Balance"
-              value={formatMoney(
-                account.balance,
-              )}
-              icon={BriefcaseBusiness}
-            />
-
-            <PositionSummaryCard
-              label="Equity"
-              value={formatMoney(
-                account.equity,
-              )}
-              icon={TrendingUp}
-            />
-
-            <PositionSummaryCard
-              label="Free margin"
-              value={formatMoney(
-                account.free_margin,
-              )}
-              icon={BarChart3}
-            />
-
-            <PositionSummaryCard
-              label="Leverage"
-              value={
-                account.leverage
-                  ? `1:${account.leverage}`
-                  : "--"
-              }
-              icon={Activity}
-            />
-          </div>
-
-          <div className="analysis-panel">
-            <div className="panel-heading">
-              <BriefcaseBusiness size={20} />
-
-              <div>
-                <h3>Account information</h3>
-
-                <span>
-                  Information returned directly
-                  by the connected MT5 terminal
-                </span>
-              </div>
-            </div>
-
-            <div className="reasoning-content">
-              <ReasoningBlock
-                title="Account"
-                value={
-                  account.login
-                    ? String(account.login)
-                    : "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Account name"
-                value={
-                  account.name ||
-                  "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Server"
-                value={
-                  account.server ||
-                  "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Currency"
-                value={
-                  account.currency ||
-                  "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Trading allowed"
-                value={
-                  account.trade_allowed
-                    ? "Yes"
-                    : "No"
-                }
-              />
-
-              <ReasoningBlock
-                title="Margin"
-                value={formatMoney(
-                  account.margin,
-                )}
-              />
-            </div>
-          </div>
-
-          <div className="analysis-panel">
-            <div className="panel-heading">
-              <Settings size={20} />
-
-              <div>
-                <h3>Terminal information</h3>
-
-                <span>
-                  Connected MetaTrader 5 environment
-                </span>
-              </div>
-            </div>
-
-            <div className="reasoning-content">
-              <ReasoningBlock
-                title="Terminal"
-                value={
-                  terminal.name ||
-                  "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Company"
-                value={
-                  terminal.company ||
-                  "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Terminal build"
-                value={
-                  version.build
-                    ? String(version.build)
-                    : "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Terminal version"
-                value={
-                  version.terminal
-                    ? String(version.terminal)
-                    : "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Release date"
-                value={
-                  version.release_date
-                    ? String(
-                        version.release_date,
-                      )
-                    : "Unavailable"
-                }
-              />
-
-              <ReasoningBlock
-                title="Terminal path"
-                value={
-                  terminal.path ||
-                  "Unavailable"
-                }
-              />
-            </div>
-          </div>
-        </>
-      )}
-
-      {!loading && !connected && (
-        <EmptyState
-          title="MetaTrader 5 is not connected"
-          description="Connect the MT5 terminal to view the live account configuration and trading status."
-        />
-      )}
     </section>
   );
 }
@@ -2444,6 +2382,7 @@ function describeSupportResistance(
 }
 
 export default App;
+
 
 
 

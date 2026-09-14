@@ -16,6 +16,8 @@ from app.api.trade_history import (
     router as trade_history_router,
 )
 
+from app.api.settings import router as settings_router
+
 from app.routes import risk
 from app.routes import lot
 from app.routes import execution
@@ -178,6 +180,8 @@ app.include_router(
 app.include_router(
     trade_history_router
 )
+
+app.include_router(settings_router)
 
 app.include_router(risk.router)
 
