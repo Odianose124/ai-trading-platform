@@ -6,6 +6,7 @@ from math import isfinite
 from sqlalchemy.orm import Session
 
 from app.models.trade_intent import TradeIntent
+from app.models.user_settings import UserSettings
 
 
 class TradeIntentError(Exception):
@@ -86,7 +87,7 @@ class TradeIntentResult:
 
 class TradeIntentService:
     INTENT_VALIDITY_SECONDS = 60
-    MAX_RISK_PERCENT = Decimal("2")
+    DEFAULT_MAX_RISK_PERCENT = Decimal("2")
 
     def _to_decimal(self, value, field_name: str) -> Decimal:
         try:
@@ -265,9 +266,41 @@ class TradeIntentService:
                     "Risk percent must be greater than zero."
                 )
 
-            if risk_decimal > self.MAX_RISK_PERCENT:
+            # -----------------------------------------------------
+            # USER-SPECIFIC MAXIMUM RISK
+            # -----------------------------------------------------
+            #
+            # The trading engine must never rely on a frontend
+            # limit. The user's persisted trading preference is
+            # loaded directly from the database here.
+            #
+            # If settings do not exist for any reason, fall back
+            # to the original safe 2% ceiling.
+            # -----------------------------------------------------
+
+            user_settings = (
+                db.query(UserSettings)
+                .filter(
+                    UserSettings.user_id == user_id
+                )
+                .first()
+            )
+
+            configured_max_risk = (
+                Decimal(
+                    str(
+                        user_settings.max_risk_percent
+                    )
+                )
+                if user_settings is not None
+                else self.DEFAULT_MAX_RISK_PERCENT
+            )
+
+            if risk_decimal > configured_max_risk:
                 raise TradeIntentError(
-                    "Risk percent cannot exceed 2%."
+                    "Risk percent cannot exceed your "
+                    f"configured maximum risk of "
+                    f"{configured_max_risk}%."
                 )
 
         deviation_decimal = None

@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -9,14 +9,25 @@ import {
 } from "lucide-react";
 import api from "./services/api";
 
-function TradeReviewPanel({ setup, isTradeReady }) {
+function TradeReviewPanel({
+  setup,
+  isTradeReady,
+  defaultRiskPercent = 1,
+  maxRiskPercent = 2,
+}) {
   const [volume, setVolume] = useState(
     setup?.volume && Number(setup.volume) > 0
       ? String(setup.volume)
       : "0.01",
   );
 
-  const [riskPercent, setRiskPercent] = useState("1");
+  const [riskPercent, setRiskPercent] = useState(
+    String(defaultRiskPercent),
+  );
+
+  useEffect(() => {
+    setRiskPercent(String(defaultRiskPercent));
+  }, [defaultRiskPercent]);
 
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -277,8 +288,8 @@ function TradeReviewPanel({ setup, isTradeReady }) {
 
           <input
             type="number"
-            min="0"
-            max="100"
+            min="0.1"
+            max={maxRiskPercent}
             step="0.1"
             value={riskPercent}
             onChange={(event) =>

@@ -6,6 +6,8 @@ from sqlalchemy import and_, update
 from sqlalchemy.orm import Session
 
 from app.models.trade_intent import TradeIntent
+from app.models.user_settings import UserSettings
+from app.execution.position_manager import PositionManager
 from app.services.broker_validation_service import (
     broker_validation_service,
 )
@@ -356,6 +358,48 @@ class TradeConfirmationService:
         db.commit()
 
         return True
+
+    def _get_max_open_trades(
+        self,
+        db: Session,
+        user_id: int,
+    ) -> int:
+        settings = (
+            db.query(UserSettings)
+            .filter(
+                UserSettings.user_id == user_id
+            )
+            .first()
+        )
+
+        if settings is None:
+            return 3
+
+        return int(settings.max_open_trades)
+
+
+    def _check_max_open_trades(
+        self,
+        db: Session,
+        user_id: int,
+    ) -> tuple[bool, int, int]:
+        max_open_trades = self._get_max_open_trades(
+            db,
+            user_id,
+        )
+
+        position_manager = PositionManager()
+
+        open_positions = position_manager.get_positions()
+
+        open_count = len(open_positions)
+
+        return (
+            open_count < max_open_trades,
+            open_count,
+            max_open_trades,
+        )
+
 
     def _mark_rejected(
         self,
@@ -740,7 +784,56 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 5. ATOMIC CLAIM
+        # 5. MAXIMUM OPEN TRADES
+        # =========================================================
+
+        (
+            open_trades_allowed,
+            current_open_trades,
+            max_open_trades,
+        ) = self._check_max_open_trades(
+            db,
+            user_id,
+        )
+
+        if not open_trades_allowed:
+            error_message = (
+                "Maximum open trades reached. "
+                f"You currently have {current_open_trades} "
+                f"AI-managed open trade(s), and your configured "
+                f"maximum is {max_open_trades}."
+            )
+
+            self._mark_rejected(
+                db,
+                intent,
+                error_message,
+            )
+
+            return self._build_result(
+                intent,
+                approved=False,
+                status="rejected",
+                checks=checks,
+                errors=[
+                    error_message
+                ],
+                message=(
+                    "Trade confirmation rejected because "
+                    "the maximum number of open trades has "
+                    "already been reached."
+                ),
+            )
+
+        checks.append(
+            (
+                "Maximum open trades check passed: "
+                f"{current_open_trades}/{max_open_trades}"
+            )
+        )
+
+        # =========================================================
+        # 6. ATOMIC CLAIM
         # =========================================================
 
         claimed = self._claim_intent(
@@ -833,7 +926,57 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 8. FRESH BROKER VALIDATION
+        # 8. FINAL MAXIMUM OPEN TRADES RE-CHECK
+        # =========================================================
+
+        (
+            open_trades_allowed,
+            current_open_trades,
+            max_open_trades,
+        ) = self._check_max_open_trades(
+            db,
+            user_id,
+        )
+
+        if not open_trades_allowed:
+            error_message = (
+                "Maximum open trades reached before execution. "
+                f"You currently have {current_open_trades} "
+                f"AI-managed open trade(s), and your configured "
+                f"maximum is {max_open_trades}."
+            )
+
+            self._mark_rejected(
+                db,
+                intent,
+                error_message,
+            )
+
+            return self._build_result(
+                intent,
+                approved=False,
+                status="rejected",
+                checks=checks,
+                warnings=warnings,
+                errors=[
+                    error_message
+                ],
+                message=(
+                    "Trade confirmation was blocked because "
+                    "the maximum number of open trades was "
+                    "reached before broker validation."
+                ),
+            )
+
+        checks.append(
+            (
+                "Final maximum open trades check passed: "
+                f"{current_open_trades}/{max_open_trades}"
+            )
+        )
+
+        # =========================================================
+        # 9. FRESH BROKER VALIDATION
         # =========================================================
 
         try:
@@ -876,7 +1019,7 @@ class TradeConfirmationService:
             )
 
         # =========================================================
-        # 9. COLLECT BROKER DIAGNOSTICS
+        # 10. COLLECT BROKER DIAGNOSTICS
         # =========================================================
 
         checks.extend(
@@ -958,7 +1101,7 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 10. REFRESH SERVER-SIDE BROKER INFORMATION
+        # 11. REFRESH SERVER-SIDE BROKER INFORMATION
         # =========================================================
 
         intent.broker_symbol = getattr(
@@ -1010,7 +1153,7 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 11. FINAL MT5 EXECUTION SERVICE
+        # 12. FINAL MT5 EXECUTION SERVICE
         # =========================================================
 
         try:
@@ -1075,7 +1218,7 @@ class TradeConfirmationService:
             )
 
         # =========================================================
-        # 12. COLLECT FINAL EXECUTION DIAGNOSTICS
+        # 13. COLLECT FINAL EXECUTION DIAGNOSTICS
         # =========================================================
 
         checks.extend(

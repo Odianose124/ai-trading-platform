@@ -18,10 +18,7 @@ import TradeReviewPanel from "./TradeReviewPanel";
 import "./trading.css";
 
 const SYMBOL = "XAUUSD";
-const TIMEFRAME = "15m";
-
 const setupParams = {
-  timeframe: TIMEFRAME,
   limit: 500,
   strength: 2,
   lookback: 20,
@@ -30,10 +27,22 @@ const setupParams = {
 
 function TradingPage() {
   const [setup, setSetup] = useState(null);
+  const [tradingSettings, setTradingSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+
+  const preferredTimeframe =
+    tradingSettings?.preferred_timeframe || "15m";
+
+  const preferredTimeframeLabel = {
+    "1m": "1 Minute",
+    "5m": "5 Minutes",
+    "15m": "15 Minutes",
+    "1h": "1 Hour",
+    "4h": "4 Hours",
+  }[preferredTimeframe] || preferredTimeframe;
 
   const loadSetup = useCallback(async (manual = false) => {
     try {
@@ -45,10 +54,24 @@ function TradingPage() {
 
       setError("");
 
+      const settingsResponse = await api.get(
+        "/api/settings",
+      );
+
+      const settings = settingsResponse.data;
+
+      setTradingSettings(settings);
+
+      const preferredTimeframe =
+        settings?.preferred_timeframe || "15m";
+
       const response = await api.get(
         `/api/mt5/trade-setup/${SYMBOL}`,
         {
-          params: setupParams,
+          params: {
+            ...setupParams,
+            timeframe: preferredTimeframe,
+          },
         },
       );
 
@@ -198,7 +221,7 @@ function TradingPage() {
 
           <p>
             Live AI setup validation for {SYMBOL} on the{" "}
-            {TIMEFRAME} execution timeframe.
+            {preferredTimeframeLabel} execution timeframe.
           </p>
         </div>
 
@@ -665,6 +688,12 @@ function TradingPage() {
       <TradeReviewPanel
         setup={setup}
         isTradeReady={isTradeReady}
+        defaultRiskPercent={
+          tradingSettings?.risk_percent ?? 1
+        }
+        maxRiskPercent={
+          tradingSettings?.max_risk_percent ?? 2
+        }
       />
       <div className="trading-bottom-safety">
         <ShieldCheck size={19} />

@@ -28,7 +28,11 @@ class CreateTradeIntentRequest(BaseModel):
     execution_price: Decimal = Field(gt=0)
     stop_loss: Decimal = Field(gt=0)
     take_profit: Decimal = Field(gt=0)
-    risk_percent: Decimal | None = Field(default=None, gt=0, le=2)
+    risk_percent: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=100,
+    )
     signal_price_deviation_percent: Decimal | None = Field(
         default=None,
         ge=0,
