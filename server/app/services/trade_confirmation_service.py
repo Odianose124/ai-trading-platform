@@ -14,6 +14,9 @@ from app.services.broker_validation_service import (
 from app.services.mt5_execution_service import (
     mt5_execution_service,
 )
+from app.services.position_reconciliation_service import (
+    position_reconciliation_service,
+)
 
 
 class TradeConfirmationError(Exception):
@@ -545,7 +548,7 @@ class TradeConfirmationService:
         if execution_approved and execution_sent:
 
             intent.confirmation_status = "confirmed"
-            intent.execution_status = "executed"
+            intent.execution_status = "execution_reconciliation_required"
 
             intent.order_ticket = getattr(
                 execution_result,
@@ -1256,7 +1259,7 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 14. SUCCESSFUL EXECUTION
+        # 14. RECONCILE SUCCESSFUL BROKER EXECUTION
         # =========================================================
 
         execution_approved = bool(
@@ -1277,32 +1280,173 @@ class TradeConfirmationService:
 
         if execution_approved and execution_sent:
 
+            # The broker accepted the request, but this is NOT yet
+            # considered a completed platform execution.
+            #
+            # The reconciliation service must prove the resulting
+            # live MT5 position before TradeIntent becomes executed.
+
+            reconciliation_result = (
+                position_reconciliation_service.reconcile(
+                    db=db,
+                    user_id=user_id,
+                    intent_id=intent.id,
+                )
+            )
+
+            checks.extend(
+                reconciliation_result.checks
+            )
+
+            warnings.extend(
+                reconciliation_result.warnings
+            )
+
+            errors.extend(
+                reconciliation_result.errors
+            )
+
+            if reconciliation_result.reconciled:
+
+                intent = self._load_owned_intent(
+                    db,
+                    intent.id,
+                    user_id,
+                )
+
+                if intent is None:
+                    raise TradeConfirmationError(
+                        "Trade intent disappeared during execution reconciliation."
+                    )
+
+                intent.execution_status = "executed"
+                intent.execution_time = (
+                    intent.execution_time
+                    or self._now()
+                )
+                intent.error_message = None
+                intent.updated_at = self._now()
+
+                db.commit()
+                db.refresh(intent)
+
+                return self._build_result(
+                    intent,
+                    approved=True,
+                    status="executed",
+                    checks=checks,
+                    warnings=warnings,
+                    errors=[],
+                    order_ticket=getattr(
+                        execution_result,
+                        "order_ticket",
+                        intent.order_ticket,
+                    ),
+                    deal_ticket=getattr(
+                        execution_result,
+                        "deal_ticket",
+                        intent.deal_ticket,
+                    ),
+                    retcode=getattr(
+                        execution_result,
+                        "retcode",
+                        intent.retcode,
+                    ),
+                    retcode_description=getattr(
+                        execution_result,
+                        "retcode_description",
+                        intent.retcode_description,
+                    ),
+                    margin_required=getattr(
+                        execution_result,
+                        "margin_required",
+                        intent.margin_required,
+                    ),
+                    free_margin=getattr(
+                        execution_result,
+                        "free_margin",
+                        intent.free_margin,
+                    ),
+                    risk_amount=getattr(
+                        execution_result,
+                        "risk_amount",
+                        None,
+                    ),
+                    risk_percent=getattr(
+                        execution_result,
+                        "risk_percent",
+                        intent.risk_percent,
+                    ),
+                    signal_price_deviation=getattr(
+                        execution_result,
+                        "signal_price_deviation",
+                        None,
+                    ),
+                    signal_price_deviation_percent=getattr(
+                        execution_result,
+                        "signal_price_deviation_percent",
+                        intent.signal_price_deviation_percent,
+                    ),
+                    execution_sent=True,
+                    message=(
+                        "Trade was accepted by MetaTrader 5 and "
+                        "successfully reconciled with the live position."
+                    ),
+                )
+
+            # Broker accepted the execution, but we cannot prove the
+            # resulting live position. Never report success and never
+            # automatically retry.
+            intent = self._load_owned_intent(
+                db,
+                intent.id,
+                user_id,
+            )
+
+            if intent is None:
+                raise TradeConfirmationError(
+                    "Trade intent disappeared during reconciliation."
+                )
+
+            intent.execution_status = (
+                "execution_reconciliation_required"
+            )
+
+            intent.error_message = (
+                reconciliation_result.message
+            )
+
+            intent.updated_at = self._now()
+
+            db.commit()
+            db.refresh(intent)
+
             return self._build_result(
                 intent,
-                approved=True,
-                status="executed",
+                approved=False,
+                status="execution_reconciliation_required",
                 checks=checks,
                 warnings=warnings,
                 errors=errors,
                 order_ticket=getattr(
                     execution_result,
                     "order_ticket",
-                    None,
+                    intent.order_ticket,
                 ),
                 deal_ticket=getattr(
                     execution_result,
                     "deal_ticket",
-                    None,
+                    intent.deal_ticket,
                 ),
                 retcode=getattr(
                     execution_result,
                     "retcode",
-                    None,
+                    intent.retcode,
                 ),
                 retcode_description=getattr(
                     execution_result,
                     "retcode_description",
-                    None,
+                    intent.retcode_description,
                 ),
                 margin_required=getattr(
                     execution_result,
@@ -1336,8 +1480,10 @@ class TradeConfirmationService:
                 ),
                 execution_sent=True,
                 message=(
-                    "Trade confirmed and successfully "
-                    "submitted to MetaTrader 5."
+                    "MetaTrader 5 accepted the execution request, "
+                    "but the resulting live position could not be "
+                    "safely proven. The execution is locked pending "
+                    "reconciliation. No automatic retry will occur."
                 ),
             )
 

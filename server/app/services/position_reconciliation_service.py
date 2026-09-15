@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+import MetaTrader5 as mt5
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -263,45 +265,152 @@ class PositionReconciliationService:
         intent: TradeIntent,
     ) -> dict[str, Any] | None:
         """
-        Attempt to locate the resulting position.
+        Resolve the actual MT5 position from broker execution evidence.
 
-        The strongest identifier is a known position ticket.
+        The execution order/deal is NOT treated as a position ticket.
 
-        If no position ticket is available, use the execution order/deal
-        tickets only as discovery hints through direct MT5 position
-        inspection. We do not assume an order ticket is a position ticket.
+        Resolution is based on MT5 history:
+
+            order ticket
+                -> order/deal history
+                -> position_id
+                -> live MT5 position
+
+        A symbol-only fallback is deliberately forbidden because another
+        platform-owned position can already exist on the same symbol.
         """
 
-        if intent.order_ticket:
-            positions = self.position_manager.get_positions()
-
-            for position in positions:
-                if (
-                    position.get("order_ticket") == intent.order_ticket
-                    or position.get("deal_ticket") == intent.deal_ticket
-                ):
-                    return position
-
-        if intent.deal_ticket:
-            positions = self.position_manager.get_positions()
-
-            for position in positions:
-                if position.get("deal_ticket") == intent.deal_ticket:
-                    return position
-
-        broker_symbol = (
-            intent.broker_symbol
-            or intent.symbol
+        order_ticket = (
+            int(intent.order_ticket)
+            if intent.order_ticket is not None
+            else None
         )
 
-        positions = self.position_manager.get_positions(
-            symbol=broker_symbol,
+        deal_ticket = (
+            int(intent.deal_ticket)
+            if intent.deal_ticket is not None
+            else None
         )
 
-        if len(positions) == 1:
-            return positions[0]
+        candidate_position_ids: set[int] = set()
 
-        return None
+        # ----------------------------------------------------------
+        # 1. Resolve through the execution order.
+        # ----------------------------------------------------------
+
+        if order_ticket is not None:
+            try:
+                orders = mt5.history_orders_get(
+                    ticket=order_ticket
+                )
+            except Exception:
+                orders = None
+
+            if orders:
+                for order in orders:
+                    position_id = getattr(
+                        order,
+                        "position_id",
+                        None,
+                    )
+
+                    if position_id:
+                        candidate_position_ids.add(
+                            int(position_id)
+                        )
+
+            try:
+                deals = mt5.history_deals_get(
+                    ticket=order_ticket
+                )
+            except Exception:
+                deals = None
+
+            if deals:
+                for deal in deals:
+                    position_id = getattr(
+                        deal,
+                        "position_id",
+                        None,
+                    )
+
+                    if position_id:
+                        candidate_position_ids.add(
+                            int(position_id)
+                        )
+
+        # ----------------------------------------------------------
+        # 2. If only a deal ticket is available, locate that deal
+        #    in a narrow execution-time history window.
+        # ----------------------------------------------------------
+
+        if deal_ticket is not None and not candidate_position_ids:
+            execution_time = (
+                intent.execution_time
+                or intent.confirmation_time
+                or self._now()
+            )
+
+            try:
+                timestamp = int(
+                    execution_time.timestamp()
+                )
+
+                date_from = datetime.fromtimestamp(
+                    max(timestamp - 300, 0),
+                    tz=timezone.utc,
+                )
+
+                date_to = datetime.fromtimestamp(
+                    timestamp + 300,
+                    tz=timezone.utc,
+                )
+
+                deals = mt5.history_deals_get(
+                    date_from,
+                    date_to,
+                )
+            except Exception:
+                deals = None
+
+            if deals:
+                for deal in deals:
+                    if int(
+                        getattr(deal, "ticket", 0)
+                    ) != deal_ticket:
+                        continue
+
+                    position_id = getattr(
+                        deal,
+                        "position_id",
+                        None,
+                    )
+
+                    if position_id:
+                        candidate_position_ids.add(
+                            int(position_id)
+                        )
+
+        # ----------------------------------------------------------
+        # 3. Exactly one position identity must be proven.
+        # ----------------------------------------------------------
+
+        if len(candidate_position_ids) != 1:
+            return None
+
+        position_ticket = next(
+            iter(candidate_position_ids)
+        )
+
+        position = self.position_manager.get_position(
+            position_ticket
+        )
+
+        if position is None:
+            return None
+
+        return position
+
 
     # ==============================================================
     # Validation
@@ -769,6 +878,7 @@ class PositionReconciliationService:
             "executed",
             "executing",
             "execution_unknown",
+            "execution_reconciliation_required",
         }:
             errors.append(
                 "Trade intent is not in a state that can be reconciled."
@@ -1017,33 +1127,19 @@ class PositionReconciliationService:
             )
 
         # ----------------------------------------------------------
-        # 8. Mark the trade intent as reconciled/executed
+        # 8. Persist reconciliation only.
+        #
+        # TradeIntent execution status is owned by the confirmation
+        # service. This service proves and persists the actual broker
+        # position but does not declare the trade executed.
         # ----------------------------------------------------------
-
-        intent.execution_status = "executed"
-        intent.order_ticket = (
-            int(actual_position["order_ticket"])
-            if actual_position.get("order_ticket") is not None
-            else intent.order_ticket
-        )
-        intent.deal_ticket = (
-            int(actual_position["deal_ticket"])
-            if actual_position.get("deal_ticket") is not None
-            else intent.deal_ticket
-        )
-        intent.execution_time = (
-            intent.execution_time
-            or self._now()
-        )
-        intent.error_message = None
-        intent.updated_at = self._now()
 
         db.commit()
 
         db.refresh(managed_position)
 
         checks.append(
-            "Trade intent marked executed after successful reconciliation."
+            "Live MT5 position successfully reconciled and persisted."
         )
 
         return PositionReconciliationResult(
@@ -1077,14 +1173,14 @@ class PositionReconciliationService:
                 actual_position.get("take_profit")
             ),
             order_ticket=(
-                int(actual_position["order_ticket"])
-                if actual_position.get("order_ticket") is not None
-                else intent.order_ticket
+                int(intent.order_ticket)
+                if intent.order_ticket is not None
+                else None
             ),
             deal_ticket=(
-                int(actual_position["deal_ticket"])
-                if actual_position.get("deal_ticket") is not None
-                else intent.deal_ticket
+                int(intent.deal_ticket)
+                if intent.deal_ticket is not None
+                else None
             ),
             managed_position_id=managed_position.id,
             checks=checks,
