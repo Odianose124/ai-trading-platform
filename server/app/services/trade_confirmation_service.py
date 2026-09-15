@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.models.trade_intent import TradeIntent
 from app.models.user_settings import UserSettings
+from app.models.mt5_trading_account import MT5TradingAccount
 from app.execution.position_manager import PositionManager
+from app.mt5.connection import (
+    MT5AccountMismatchError,
+    MT5ConnectionError,
+    mt5_connection,
+)
 from app.services.broker_validation_service import (
     broker_validation_service,
 )
@@ -381,19 +387,90 @@ class TradeConfirmationService:
         return int(settings.max_open_trades)
 
 
-    def _check_max_open_trades(
+    def _get_verified_mt5_account(
         self,
         db: Session,
         user_id: int,
-    ) -> tuple[bool, int, int]:
-        max_open_trades = self._get_max_open_trades(
+    ) -> MT5TradingAccount:
+        """
+        Resolve and verify the MT5 account owned by the authenticated user.
+
+        This check is intentionally performed inside the confirmation
+        service so execution cannot depend on a previous API-layer check.
+        """
+
+        account = (
+            db.query(MT5TradingAccount)
+            .filter(
+                MT5TradingAccount.user_id == user_id,
+                MT5TradingAccount.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if account is None:
+            raise TradeConfirmationError(
+                "No active MetaTrader 5 trading account is registered "
+                "for this user."
+            )
+
+        try:
+            mt5_connection.verify_account(
+                expected_login=account.mt5_login,
+                expected_server=account.server,
+            )
+        except MT5AccountMismatchError as exc:
+            raise TradeConfirmationError(
+                "The currently connected MetaTrader 5 account does not "
+                "belong to the authenticated user."
+            ) from exc
+        except MT5ConnectionError as exc:
+            raise TradeConfirmationError(
+                "MetaTrader 5 ownership could not be verified because "
+                "the trading terminal is unavailable."
+            ) from exc
+
+        return account
+
+    def _get_verified_open_positions(
+        self,
+        db: Session,
+        user_id: int,
+    ) -> tuple[MT5TradingAccount, list[dict]]:
+        """
+        Verify MT5 ownership first, then read platform-owned positions.
+
+        PositionManager is deliberately called only after the live MT5
+        login/server has been verified against the authenticated user.
+        """
+
+        account = self._get_verified_mt5_account(
             db,
             user_id,
         )
 
         position_manager = PositionManager()
 
-        open_positions = position_manager.get_positions()
+        try:
+            open_positions = position_manager.get_positions()
+        except MT5ConnectionError as exc:
+            raise TradeConfirmationError(
+                "Open MT5 positions could not be read after account "
+                "ownership verification."
+            ) from exc
+
+        return account, open_positions
+
+    def _check_max_open_trades(
+        self,
+        db: Session,
+        user_id: int,
+        open_positions: list[dict],
+    ) -> tuple[bool, int, int]:
+        max_open_trades = self._get_max_open_trades(
+            db,
+            user_id,
+        )
 
         open_count = len(open_positions)
 
@@ -787,8 +864,46 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 5. MAXIMUM OPEN TRADES
+        # 5. VERIFY MT5 OWNERSHIP + MAXIMUM OPEN TRADES
         # =========================================================
+
+        try:
+            (
+                verified_mt5_account,
+                verified_open_positions,
+            ) = self._get_verified_open_positions(
+                db,
+                user_id,
+            )
+
+        except TradeConfirmationError as exc:
+            error_message = str(exc)
+
+            self._mark_rejected(
+                db,
+                intent,
+                error_message,
+            )
+
+            return self._build_result(
+                intent,
+                approved=False,
+                status="rejected",
+                checks=checks,
+                errors=[error_message],
+                message=(
+                    "Trade confirmation was rejected because "
+                    "MetaTrader 5 account ownership could not be verified."
+                ),
+            )
+
+        checks.append(
+            (
+                "MT5 account ownership verified: "
+                f"{verified_mt5_account.mt5_login}/"
+                f"{verified_mt5_account.server}"
+            )
+        )
 
         (
             open_trades_allowed,
@@ -797,6 +912,7 @@ class TradeConfirmationService:
         ) = self._check_max_open_trades(
             db,
             user_id,
+            verified_open_positions,
         )
 
         if not open_trades_allowed:
@@ -929,8 +1045,48 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 8. FINAL MAXIMUM OPEN TRADES RE-CHECK
+        # 8. FINAL MT5 OWNERSHIP + OPEN-TRADE RE-CHECK
         # =========================================================
+
+        try:
+            (
+                verified_mt5_account,
+                verified_open_positions,
+            ) = self._get_verified_open_positions(
+                db,
+                user_id,
+            )
+
+        except TradeConfirmationError as exc:
+            error_message = str(exc)
+
+            self._mark_rejected(
+                db,
+                intent,
+                error_message,
+            )
+
+            return self._build_result(
+                intent,
+                approved=False,
+                status="rejected",
+                checks=checks,
+                warnings=warnings,
+                errors=[error_message],
+                message=(
+                    "Trade confirmation was blocked because the "
+                    "MetaTrader 5 account could not be re-verified "
+                    "immediately before broker validation."
+                ),
+            )
+
+        checks.append(
+            (
+                "Final MT5 account ownership verification passed: "
+                f"{verified_mt5_account.mt5_login}/"
+                f"{verified_mt5_account.server}"
+            )
+        )
 
         (
             open_trades_allowed,
@@ -939,6 +1095,7 @@ class TradeConfirmationService:
         ) = self._check_max_open_trades(
             db,
             user_id,
+            verified_open_positions,
         )
 
         if not open_trades_allowed:
@@ -1156,7 +1313,57 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 12. FINAL MT5 EXECUTION SERVICE
+        # 12. FINAL MT5 OWNERSHIP RE-VERIFICATION
+        # =========================================================
+
+        try:
+            self._get_verified_mt5_account(
+                db,
+                user_id,
+            )
+
+        except TradeConfirmationError as exc:
+            error_message = str(exc)
+
+            self._mark_rejected(
+                db,
+                intent,
+                error_message,
+            )
+
+            return self._build_result(
+                intent,
+                approved=False,
+                status="rejected",
+                checks=checks,
+                warnings=warnings,
+                errors=[error_message],
+                margin_required=intent.margin_required,
+                free_margin=intent.free_margin,
+                signal_price_deviation=getattr(
+                    intent,
+                    "signal_price_deviation",
+                    None,
+                ),
+                signal_price_deviation_percent=getattr(
+                    intent,
+                    "signal_price_deviation_percent",
+                    None,
+                ),
+                execution_sent=False,
+                message=(
+                    "MT5 execution was blocked because account "
+                    "ownership could not be verified immediately "
+                    "before order submission."
+                ),
+            )
+
+        checks.append(
+            "Final MT5 account ownership verification passed immediately before execution"
+        )
+
+        # =========================================================
+        # 13. FINAL MT5 EXECUTION SERVICE
         # =========================================================
 
         try:
@@ -1221,7 +1428,7 @@ class TradeConfirmationService:
             )
 
         # =========================================================
-        # 13. COLLECT FINAL EXECUTION DIAGNOSTICS
+        # 14. COLLECT FINAL EXECUTION DIAGNOSTICS
         # =========================================================
 
         checks.extend(
@@ -1249,7 +1456,7 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 13. PERSIST FINAL EXECUTION RESULT
+        # 15. PERSIST FINAL EXECUTION RESULT
         # =========================================================
 
         self._mark_execution_result(
@@ -1259,7 +1466,7 @@ class TradeConfirmationService:
         )
 
         # =========================================================
-        # 14. RECONCILE SUCCESSFUL BROKER EXECUTION
+        # 16. RECONCILE SUCCESSFUL BROKER EXECUTION
         # =========================================================
 
         execution_approved = bool(
