@@ -1,679 +1,195 @@
+from typing import Any
+
 import MetaTrader5 as mt5
 
-
-
+from app.mt5.connection import (
+    MT5ConnectionError,
+    mt5_connection,
+)
 
 
 class PositionManager:
+    """
+    Read-only MT5 position manager.
 
+    This class is currently responsible for:
+    - reading live positions
+    - filtering platform-owned positions
+    - producing position summaries
 
+    Live SL/TP modification and position closing will be moved into
+    the controlled execution/management pipeline later.
 
-    def __init__(self):
+    No method in this class initializes MT5 independently.
+    No method in this class sends an MT5 order.
+    """
 
-        self.magic_number = 202609
+    MAGIC_NUMBER = 202609
 
+    def __init__(self) -> None:
+        self.magic_number = self.MAGIC_NUMBER
 
+    # ------------------------------------------------------------------
+    # CONNECTION
+    # ------------------------------------------------------------------
 
+    def ensure_connection(self) -> bool:
+        """
+        Use the authoritative MT5 connection.
 
+        Never call mt5.initialize() directly here.
+        """
 
+        try:
+            mt5_connection.ensure_connected()
+            return True
 
+        except MT5ConnectionError:
+            return False
 
-    # =====================================
-    # MT5 CONNECTION
-    # =====================================
-
-
-    def ensure_connection(self):
-
-
-        terminal = mt5.terminal_info()
-
-
-
-        if terminal is None:
-
-
-            return mt5.initialize()
-
-
-
-        return True
-
-
-
-
-
-
-
-    # =====================================
-    # GET AI POSITIONS
-    # =====================================
-
+    # ------------------------------------------------------------------
+    # GET POSITIONS
+    # ------------------------------------------------------------------
 
     def get_positions(
         self,
-        symbol=None
-    ):
-
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
 
         if not self.ensure_connection():
-
-
             return []
-
-
-
 
         positions = mt5.positions_get()
 
-
-
         if positions is None:
-
-
             return []
 
+        normalized_symbol = (
+            symbol.strip().upper()
+            if symbol
+            else None
+        )
 
-
-
-
-        result = []
-
-
-
+        result: list[dict[str, Any]] = []
 
         for position in positions:
 
-
-
             if position.magic != self.magic_number:
-
-
                 continue
 
-
-
-
-
-            if symbol and position.symbol != symbol:
-
-
+            if (
+                normalized_symbol
+                and position.symbol.upper()
+                != normalized_symbol
+            ):
                 continue
 
+            if position.type == mt5.POSITION_TYPE_BUY:
+                position_type = "buy"
 
+            elif position.type == mt5.POSITION_TYPE_SELL:
+                position_type = "sell"
 
+            else:
+                continue
 
-
-            position_type = (
-
-                "buy"
-
-                if position.type == mt5.POSITION_TYPE_BUY
-
-                else
-
-                "sell"
-
+            result.append(
+                {
+                    "ticket": position.ticket,
+                    "symbol": position.symbol,
+                    "type": position_type,
+                    "volume": position.volume,
+                    "entry_price": position.price_open,
+                    "current_price": position.price_current,
+                    "stop_loss": position.sl,
+                    "take_profit": position.tp,
+                    "profit": position.profit,
+                    "swap": position.swap,
+                    "magic": position.magic,
+                    "time": position.time,
+                    "time_update": position.time_update,
+                }
             )
-
-
-
-
-
-            result.append({
-
-
-
-                "ticket":
-
-                position.ticket,
-
-
-
-                "symbol":
-
-                position.symbol,
-
-
-
-                "type":
-
-                position_type,
-
-
-
-                "volume":
-
-                position.volume,
-
-
-
-                "entry_price":
-
-                position.price_open,
-
-
-
-                "current_price":
-
-                position.price_current,
-
-
-
-                "stop_loss":
-
-                position.sl,
-
-
-
-                "take_profit":
-
-                position.tp,
-
-
-
-                "profit":
-
-                position.profit,
-
-
-
-                "swap":
-
-                position.swap,
-
-
-
-                "magic":
-
-                position.magic
-
-
-
-            })
-
-
-
-
 
         return result
 
+    # ------------------------------------------------------------------
+    # GET SINGLE POSITION
+    # ------------------------------------------------------------------
 
-
-
-
-
-
-    # =====================================
-    # MODIFY POSITION SL / TP
-    # =====================================
-
-
-    def modify_position(
+    def get_position(
         self,
-        ticket,
-        stop_loss,
-        take_profit=None
-    ):
+        ticket: int,
+    ) -> dict[str, Any] | None:
 
+        if not self.ensure_connection():
+            return None
+
+        try:
+            ticket = int(ticket)
+        except (TypeError, ValueError):
+            return None
 
         positions = mt5.positions_get(
             ticket=ticket
         )
 
-
-
         if not positions:
-
-
-            return {
-
-
-                "status":"error",
-
-
-                "message":"Position not found"
-
-
-            }
-
-
-
+            return None
 
         position = positions[0]
 
+        if position.magic != self.magic_number:
+            return None
 
+        if position.type == mt5.POSITION_TYPE_BUY:
+            position_type = "buy"
 
+        elif position.type == mt5.POSITION_TYPE_SELL:
+            position_type = "sell"
 
-        if take_profit is None:
-
-
-            take_profit = position.tp
-
-
-
-
-
-        request = {
-
-
-
-            "action":
-
-            mt5.TRADE_ACTION_SLTP,
-
-
-
-            "position":
-
-            ticket,
-
-
-
-            "symbol":
-
-            position.symbol,
-
-
-
-            "sl":
-
-            stop_loss,
-
-
-
-            "tp":
-
-            take_profit
-
-
-        }
-
-
-
-
-
-        result = mt5.order_send(request)
-
-
-
-
-        if result is None:
-
-
-            return {
-
-
-                "status":"failed",
-
-
-                "message":"Modification failed"
-
-
-            }
-
-
-
-
-
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-
-
-            return {
-
-
-                "status":"failed",
-
-
-                "retcode":result.retcode,
-
-
-                "message":result.comment
-
-
-            }
-
-
-
-
-
-
+        else:
+            return None
 
         return {
-
-
-            "status":"success",
-
-
-            "ticket":ticket,
-
-
-            "new_stop_loss":stop_loss,
-
-
-            "take_profit":take_profit
-
-
+            "ticket": position.ticket,
+            "symbol": position.symbol,
+            "type": position_type,
+            "volume": position.volume,
+            "entry_price": position.price_open,
+            "current_price": position.price_current,
+            "stop_loss": position.sl,
+            "take_profit": position.tp,
+            "profit": position.profit,
+            "swap": position.swap,
+            "magic": position.magic,
+            "time": position.time,
+            "time_update": position.time_update,
         }
 
+    # ------------------------------------------------------------------
+    # SUMMARY
+    # ------------------------------------------------------------------
 
-
-
-
-
-
-
-
-    # =====================================
-    # MOVE STOP LOSS TO BREAK EVEN
-    # =====================================
-
-
-    def move_to_break_even(
-        self,
-        ticket
-    ):
-
-
-
-        positions = mt5.positions_get(
-            ticket=ticket
-        )
-
-
-
-        if not positions:
-
-
-            return {
-
-
-                "status":"error",
-
-
-                "message":"Position not found"
-
-
-            }
-
-
-
-
-
-        position = positions[0]
-
-
-
-
-
-        return self.modify_position(
-
-            ticket,
-
-            position.price_open,
-
-            position.tp
-
-        )
-
-
-
-
-
-
-
-
-
-    # =====================================
-    # AUTO BREAK EVEN CHECK
-    # =====================================
-
-
-    def check_break_even(
-        self,
-        profit_distance=5
-    ):
-
+    def summary(self) -> dict[str, Any]:
 
         positions = self.get_positions()
-
-
-
-        actions = []
-
-
-
-
-
-        for position in positions:
-
-
-
-            entry = position["entry_price"]
-
-
-            current = position["current_price"]
-
-
-
-
-
-            if position["type"] == "buy":
-
-
-                movement = current - entry
-
-
-
-            else:
-
-
-                movement = entry - current
-
-
-
-
-
-            if movement >= profit_distance:
-
-
-
-                result = self.move_to_break_even(
-
-                    position["ticket"]
-
-                )
-
-
-                actions.append(result)
-
-
-
-
-
-
-
-        return actions
-
-
-
-
-
-
-
-    # =====================================
-    # TRAILING STOP
-    # =====================================
-
-
-    def trailing_stop(
-        self,
-        trail_distance=3
-    ):
-
-
-
-        positions = self.get_positions()
-
-
-
-        actions = []
-
-
-
-
-
-        for position in positions:
-
-
-
-            current = position["current_price"]
-
-
-
-            old_sl = position["stop_loss"]
-
-
-
-            ticket = position["ticket"]
-
-
-
-
-
-            if position["type"] == "buy":
-
-
-
-                new_sl = current - trail_distance
-
-
-
-
-
-                if old_sl == 0 or new_sl > old_sl:
-
-
-
-                    result = self.modify_position(
-
-                        ticket,
-
-                        new_sl,
-
-                        position["take_profit"]
-
-                    )
-
-
-                    actions.append(result)
-
-
-
-
-
-
-
-            else:
-
-
-
-                new_sl = current + trail_distance
-
-
-
-
-
-                if old_sl == 0 or new_sl < old_sl:
-
-
-
-                    result = self.modify_position(
-
-                        ticket,
-
-                        new_sl,
-
-                        position["take_profit"]
-
-                    )
-
-
-                    actions.append(result)
-
-
-
-
-
-
-
-
-        return actions
-
-
-
-
-
-
-
-    # =====================================
-    # POSITION SUMMARY
-    # =====================================
-
-
-    def summary(self):
-
-
-        positions = self.get_positions()
-
-
 
         total_profit = sum(
-
-            p["profit"]
-
-            for p in positions
-
+            float(position["profit"])
+            for position in positions
         )
-
-
 
         total_volume = sum(
-
-            p["volume"]
-
-            for p in positions
-
+            float(position["volume"])
+            for position in positions
         )
 
-
-
-
-
         return {
-
-
-
-            "open_trades":
-
-            len(positions),
-
-
-
-            "total_volume":
-
-            total_volume,
-
-
-
-            "floating_profit":
-
-            round(
-
+            "open_trades": len(positions),
+            "total_volume": total_volume,
+            "floating_profit": round(
                 total_profit,
-
-                2
-
-            )
-
+                2,
+            ),
         }
