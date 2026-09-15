@@ -14,9 +14,15 @@ from sqlalchemy.orm import Session
 from app.api.market_data import market_data_manager
 from app.core.auth import get_current_user
 from app.database.connection import get_db
-from app.models.order import Order
+from app.execution.position_manager import PositionManager
+from app.models.mt5_trading_account import MT5TradingAccount
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.mt5.connection import (
+    MT5AccountMismatchError,
+    MT5ConnectionError,
+    mt5_connection,
+)
 from app.services.execution_gate_service import (
     evaluate_execution_gate,
     serialize_execution_decision,
@@ -30,6 +36,9 @@ router = APIRouter(
     prefix="/api/execution",
     tags=["Execution"],
 )
+
+
+position_manager = PositionManager()
 
 
 def calculate_daily_loss(
@@ -76,38 +85,83 @@ def calculate_daily_loss(
 
 
 def calculate_total_open_exposure(
-    db: Session,
-    user_id: int,
+    positions: list[dict],
 ) -> Decimal:
     """
-    Calculate the notional value of all currently open positions.
-    """
+    Calculate gross notional exposure from the authoritative MT5-owned
+    positions returned by PositionManager.
 
-    open_orders = (
-        db.query(Order)
-        .filter(
-            Order.user_id == user_id,
-            Order.status == "open",
-        )
-        .all()
-    )
+    Only platform-owned positions are included because PositionManager
+    filters by the authoritative platform magic number.
+    """
 
     total_exposure = Decimal("0.00")
 
-    for order in open_orders:
-        quantity = Decimal(
-            str(order.quantity)
+    for position in positions:
+        volume = Decimal(
+            str(position["volume"])
         )
 
         entry_price = Decimal(
-            str(order.entry_price)
+            str(position["entry_price"])
         )
 
         total_exposure += (
-            quantity * entry_price
+            volume * entry_price
         )
 
     return total_exposure
+
+
+def get_authoritative_mt5_context(
+    db: Session,
+    user_id: int,
+) -> tuple[MT5TradingAccount, dict, list[dict]]:
+    """
+    Resolve and verify the authenticated user's registered MT5 account,
+    then read the live broker account and platform-owned positions.
+    """
+
+    mt5_account = (
+        db.query(MT5TradingAccount)
+        .filter(
+            MT5TradingAccount.user_id == user_id,
+            MT5TradingAccount.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if mt5_account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active MT5 trading account not found",
+        )
+
+    try:
+        broker_account = mt5_connection.verify_account(
+            expected_login=mt5_account.mt5_login,
+            expected_server=mt5_account.server,
+        )
+
+        positions = position_manager.get_positions()
+
+    except MT5AccountMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    except MT5ConnectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    return (
+        mt5_account,
+        broker_account,
+        positions,
+    )
 
 
 @router.get(
@@ -151,7 +205,7 @@ async def get_execution_decision(
         )
 
     # ---------------------------------------------------------
-    # ACCOUNT VALIDATION
+    # APPLICATION ACCOUNT VALIDATION
     # ---------------------------------------------------------
 
     account = get_trading_account(
@@ -164,6 +218,25 @@ async def get_execution_decision(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Trading account not found",
         )
+
+    # ---------------------------------------------------------
+    # AUTHORITATIVE MT5 ACCOUNT / POSITION CONTEXT
+    # ---------------------------------------------------------
+
+    (
+        mt5_account,
+        broker_account,
+        positions,
+    ) = get_authoritative_mt5_context(
+        db=db,
+        user_id=current_user.id,
+    )
+
+    total_exposure_amount = (
+        calculate_total_open_exposure(
+            positions=positions,
+        )
+    )
 
     # ---------------------------------------------------------
     # LIVE MARKET PRICE
@@ -198,7 +271,7 @@ async def get_execution_decision(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
-        )
+        ) from exc
 
     # ---------------------------------------------------------
     # RISK CONTEXT
@@ -209,13 +282,6 @@ async def get_execution_decision(
         user_id=current_user.id,
     )
 
-    total_exposure_amount = (
-        calculate_total_open_exposure(
-            db=db,
-            user_id=current_user.id,
-        )
-    )
-
     # ---------------------------------------------------------
     # EXECUTION GATE
     # ---------------------------------------------------------
@@ -224,11 +290,11 @@ async def get_execution_decision(
         setup=setup,
 
         account_balance=Decimal(
-            str(account.balance)
+            str(broker_account["balance"])
         ),
 
         available_balance=Decimal(
-            str(account.available_balance)
+            str(broker_account["free_margin"])
         ),
 
         daily_loss_amount=daily_loss_amount,
@@ -258,9 +324,17 @@ async def get_execution_decision(
 
     response["account"] = {
         "id": account.id,
-        "balance": account.balance,
-        "available_balance": account.available_balance,
-        "currency": account.currency,
+        "balance": broker_account["balance"],
+        "available_balance": broker_account["free_margin"],
+        "currency": broker_account["currency"],
+    }
+
+    response["mt5_account"] = {
+        "id": mt5_account.id,
+        "login": mt5_account.mt5_login,
+        "server": mt5_account.server,
+        "currency": mt5_account.currency,
+        "ownership_verified": True,
     }
 
     response["risk_context"] = {
@@ -269,6 +343,9 @@ async def get_execution_decision(
         "daily_loss_amount": daily_loss_amount,
         "total_open_exposure": (
             total_exposure_amount
+        ),
+        "platform_owned_open_positions": len(
+            positions
         ),
     }
 
