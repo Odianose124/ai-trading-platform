@@ -10,7 +10,7 @@ from app.services.execution_preview_service import (
     ExecutionPreviewError,
     execution_preview_service,
 )
-from app.core.dependencies import get_current_user
+from app.core.auth import get_current_user
 
 
 router = APIRouter(

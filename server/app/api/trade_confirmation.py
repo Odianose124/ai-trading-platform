@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user
+from app.core.auth import get_current_user
 from app.database.connection import get_db
 from app.services.trade_confirmation_service import (
     trade_confirmation_service,
