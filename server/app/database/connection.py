@@ -43,3 +43,4 @@ def create_database_tables():
 # registers them in Base.metadata without creating a circular import.
 from app.models.trade_intent import TradeIntent  # noqa: E402, F401
 from app.models.user_settings import UserSettings # noqa: E402, F401
+from app.models.mt5_trading_account import MT5TradingAccount  # noqa: E402, F401

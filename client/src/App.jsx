@@ -479,6 +479,7 @@ function CommandCenter() {
   const [mtf, setMtf] = useState(null);
   const [accountStatus, setAccountStatus] = useState(null);
   const [positionSummary, setPositionSummary] = useState(null);
+  const [tradingSettings, setTradingSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -501,7 +502,7 @@ function CommandCenter() {
           ),
 
           api.get(
-            "/api/mt5/market-data/analysis/ai/XAUUSD/15m",
+            `/api/mt5/market-data/analysis/ai/XAUUSD/${preferredTimeframe}`,
             {
               params: {
                 limit: 500,
@@ -516,7 +517,7 @@ function CommandCenter() {
             "/api/mt5/analysis/multi-timeframe/XAUUSD",
             {
               params: {
-                primary_timeframe: "15m",
+                primary_timeframe: preferredTimeframe,
                 limit: 500,
                 strength: 2,
                 lookback: 20,
@@ -543,6 +544,7 @@ function CommandCenter() {
         setMtf(mtfResponse.data);
         setAccountStatus(accountResponse.data);
         setPositionSummary(positionsResponse.data);
+        setTradingSettings(settingsResponse.data);
       } catch (requestError) {
         if (!mounted) {
           return;
@@ -647,7 +649,7 @@ function CommandCenter() {
           <div className="decision-main">
             <div>
               <span className="instrument-label">
-                XAUUSD · 15m
+                XAUUSD · ${preferredTimeframeLabel}
               </span>
 
               <h2 className={biasClass(aiBias)}>
@@ -813,9 +815,9 @@ function CommandCenter() {
         />
 
         <InsightCard
-          title="15m execution bias"
+          title={`${preferredTimeframeLabel} execution bias`}
           value={formatBias(executionBias)}
-          description="Directional assessment for the primary execution timeframe."
+          description="Directional assessment for the saved execution timeframe."
         />
 
         <InsightCard
@@ -865,7 +867,7 @@ function CommandCenter() {
           />
 
           <ReasoningBlock
-            title="15m execution timeframe"
+            title={`${preferredTimeframeLabel} execution timeframe`}
             value={formatBias(executionBias)}
           />
 
