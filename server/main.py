@@ -20,7 +20,6 @@ from app.api.settings import router as settings_router
 
 from app.routes import risk
 from app.routes import lot
-from app.routes import execution
 
 from app.api.execution_preview import (
     router as execution_preview_router,
@@ -106,6 +105,7 @@ from app.api.risk_management import (
     router as risk_management_router,
 )
 
+
 from app.api.execution import (
     router as execution_router,
 )
@@ -186,8 +186,6 @@ app.include_router(settings_router)
 app.include_router(risk.router)
 
 app.include_router(lot.router)
-
-app.include_router(execution.router)
 
 app.include_router(
     execution_preview_router
