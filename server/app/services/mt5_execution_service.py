@@ -999,7 +999,7 @@ class MT5ExecutionService:
             "sl": float(requested_stop_loss),
             "tp": float(requested_take_profit),
             "deviation": 20,
-            "magic": 20260903,
+            "magic": 202609,
             "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": filling_mode,
@@ -1405,3 +1405,4 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
+
