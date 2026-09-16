@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+﻿from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -108,6 +108,10 @@ from app.api.risk_management import (
 
 from app.api.execution import (
     router as execution_router,
+)
+
+from app.api.ai_trade_management import (
+    router as ai_trade_management_router,
 )
 
 
@@ -265,6 +269,10 @@ app.include_router(
 
 app.include_router(
     execution_router
+)
+
+app.include_router(
+    ai_trade_management_router
 )
 
 
