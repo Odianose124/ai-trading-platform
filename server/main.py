@@ -1,4 +1,4 @@
-﻿from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -114,6 +114,14 @@ from app.api.ai_trade_management import (
     router as ai_trade_management_router,
 )
 
+from app.api.pending_order_reconciliation import (
+    router as pending_order_reconciliation_router,
+)
+
+from app.services.pending_order_monitor import (
+    pending_order_monitor,
+)
+
 
 MARKET_SYMBOLS = [
     "BTCUSD",
@@ -138,7 +146,13 @@ async def lifespan(app: FastAPI):
     # Start automatic SL/TP order monitoring.
     await live_order_monitor.start_background()
 
+    # Start pending-order reconciliation monitoring.
+    await pending_order_monitor.start_background()
+
     yield
+
+    # Stop pending-order reconciliation monitoring.
+    await pending_order_monitor.stop()
 
     # Stop the live order monitor.
     await live_order_monitor.stop()
@@ -273,6 +287,10 @@ app.include_router(
 
 app.include_router(
     ai_trade_management_router
+)
+
+app.include_router(
+    pending_order_reconciliation_router
 )
 
 
