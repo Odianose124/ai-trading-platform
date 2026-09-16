@@ -40,11 +40,15 @@ class TradeIntent(Base):
         nullable=False,
     )
 
+    # User-requested entry price.
+    # This remains authoritative for pending entries.
     signal_entry_price: Mapped[Decimal] = mapped_column(
         Numeric(30, 10),
         nullable=False,
     )
 
+    # Actual broker fill price.
+    # NULL while a pending order is waiting.
     execution_price: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(30, 10),
         nullable=True,
@@ -84,9 +88,49 @@ class TradeIntent(Base):
     )
 
     execution_status: Mapped[str] = mapped_column(
-        String(30),
+        String(40),
         nullable=False,
         default="not_executed",
+    )
+
+    # MARKET
+    # BUY_LIMIT
+    # BUY_STOP
+    # SELL_LIMIT
+    # SELL_STOP
+    order_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="MARKET",
+    )
+
+    # market
+    # pending
+    execution_mode: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="market",
+    )
+
+    # not_applicable
+    # placed
+    # filled
+    # cancelled
+    # rejected
+    pending_order_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="not_applicable",
+    )
+
+    pending_order_placed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    filled_position_ticket: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
     )
 
     signal_price_deviation_percent: Mapped[Optional[Decimal]] = mapped_column(
