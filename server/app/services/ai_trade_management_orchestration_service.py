@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -29,6 +29,8 @@ class AITradeManagementOrchestrationService:
     record, sends only the evaluator-approved decision, then reconciles
     the actual MT5 position back into ManagedPosition.
     """
+
+    VOLUME_TOLERANCE = Decimal("0.00000001")
 
     def __init__(self) -> None:
         self.evaluator = AITradeManagementService()
@@ -120,6 +122,11 @@ class AITradeManagementOrchestrationService:
         partial_percent: Decimal | None,
     ) -> str:
         if decision == "MOVE_SL":
+            if proposed_stop_loss is None:
+                raise AITradeManagementOrchestrationError(
+                    "MOVE_SL decision has no proposed stop loss."
+                )
+
             return (
                 f"{position_ticket}:MOVE_SL:"
                 f"{proposed_stop_loss.normalize()}"
@@ -246,7 +253,10 @@ class AITradeManagementOrchestrationService:
                 "status": "hold",
                 "decision": decision,
                 "evaluation": evaluation.serialize(),
-                "message": "AI management evaluated the position and produced HOLD.",
+                "message": (
+                    "AI management evaluated the position "
+                    "and produced HOLD."
+                ),
             }
 
         if decision not in {
@@ -289,7 +299,11 @@ class AITradeManagementOrchestrationService:
                     ),
                 }
 
-            if existing.status == "sent_reconciliation_required":
+            if existing.status in {
+                "created",
+                "executing",
+                "sent_reconciliation_required",
+            }:
                 reconciliation = self._reconcile_position(
                     db,
                     managed_position,
@@ -311,7 +325,7 @@ class AITradeManagementOrchestrationService:
                         ):
                             existing.status = "reconciled"
                             existing.message = (
-                                "Previously sent stop-loss action "
+                                "Previously initiated stop-loss action "
                                 "confirmed by live broker state."
                             )
                             db.commit()
@@ -324,11 +338,14 @@ class AITradeManagementOrchestrationService:
                                 "message": existing.message,
                             }
 
-                if decision == "CLOSE_POSITION" and not reconciliation["exists"]:
+                if (
+                    decision == "CLOSE_POSITION"
+                    and not reconciliation["exists"]
+                ):
                     existing.status = "reconciled"
                     existing.message = (
-                        "Previously sent close action confirmed by "
-                        "absence of the live position."
+                        "Previously initiated close action confirmed "
+                        "by absence of the live position."
                     )
                     db.commit()
 
@@ -340,11 +357,97 @@ class AITradeManagementOrchestrationService:
                         "message": existing.message,
                     }
 
+                if decision == "PARTIAL_CLOSE":
+                    # A previous partial close is only considered proven
+                    # if we have enough persisted state to establish the
+                    # expected post-action volume. The current
+                    # ManagedPosition volume has already been refreshed
+                    # by _reconcile_position(), so it MUST NOT be treated
+                    # as the pre-action volume.
+                    #
+                    # The action record stores requested_volume, but it
+                    # does not independently store the original volume.
+                    # Therefore an interrupted partial-close cannot be
+                    # safely reconstructed from the current row alone.
+                    #
+                    # This is intentionally conservative: do not send
+                    # another partial-close request when broker state
+                    # cannot conclusively prove the previous action.
+                    pass
+
                 db.commit()
 
                 raise AITradeManagementOrchestrationError(
-                    "A previous management action was sent to MT5 but "
-                    "could not yet be confirmed from the live position."
+                    "A previous AI management action is unresolved. "
+                    "The live broker state does not conclusively prove "
+                    "that the action was applied, so the action will "
+                    "not be sent again."
+                )
+
+        requested_volume = None
+
+        # Capture the broker-owned volume BEFORE any execution occurs.
+        # This value must never be read back from ManagedPosition after
+        # reconciliation because _reconcile_position() updates that
+        # field to the current live broker volume.
+        pre_action_volume = Decimal(
+            str(managed_position.volume)
+        )
+
+        if pre_action_volume <= 0:
+            raise AITradeManagementOrchestrationError(
+                "Managed position volume must be greater than zero "
+                "before AI management execution."
+            )
+
+        if decision == "PARTIAL_CLOSE":
+            live_position = self.position_manager.get_position(
+                position_ticket
+            )
+
+            if live_position is None:
+                raise AITradeManagementOrchestrationError(
+                    "Live position disappeared before partial-close execution."
+                )
+
+            live_volume = Decimal(
+                str(live_position["volume"])
+            )
+
+            if live_volume <= 0:
+                raise AITradeManagementOrchestrationError(
+                    "Live broker position volume must be greater than zero "
+                    "before partial-close execution."
+                )
+
+            # The live broker position is the final authoritative volume
+            # immediately before execution. The managed position must agree
+            # with it before the action is reserved.
+            if (
+                abs(live_volume - pre_action_volume)
+                > self.VOLUME_TOLERANCE
+            ):
+                raise AITradeManagementOrchestrationError(
+                    "Managed position volume does not match the live "
+                    "broker volume immediately before partial-close "
+                    "execution."
+                )
+
+            if partial_percent is None:
+                raise AITradeManagementOrchestrationError(
+                    "PARTIAL_CLOSE decision has no percentage."
+                )
+
+            requested_volume = (
+                live_volume
+                * partial_percent
+                / Decimal("100")
+            )
+
+            if requested_volume <= 0:
+                raise AITradeManagementOrchestrationError(
+                    "Calculated partial-close volume must be greater "
+                    "than zero."
                 )
 
         action = AIManagementAction(
@@ -355,6 +458,7 @@ class AITradeManagementOrchestrationService:
             decision=decision,
             action_key=action_key,
             status="created",
+            requested_volume=requested_volume,
             requested_stop_loss=proposed_stop_loss,
             partial_close_percent=partial_percent,
         )
@@ -362,7 +466,16 @@ class AITradeManagementOrchestrationService:
         db.add(action)
 
         try:
-            db.flush()
+            # Persist the action as executing BEFORE touching MT5.
+            #
+            # If the process crashes after this commit and before MT5
+            # responds, a retry sees the durable executing state and will
+            # reconcile/block rather than blindly sending another order.
+            action.status = "executing"
+            action.message = (
+                "AI management action reserved for broker execution."
+            )
+            db.commit()
 
             if decision == "MOVE_SL":
                 if proposed_stop_loss is None:
@@ -383,31 +496,17 @@ class AITradeManagementOrchestrationService:
                         "PARTIAL_CLOSE decision has no percentage."
                     )
 
-                live_position = self.position_manager.get_position(
-                    position_ticket
-                )
-
-                if live_position is None:
+                if requested_volume is None:
                     raise AITradeManagementOrchestrationError(
-                        "Live position disappeared before partial-close execution."
+                        "PARTIAL_CLOSE execution volume was not established."
                     )
-
-                live_volume = Decimal(
-                    str(live_position["volume"])
-                )
-
-                close_volume = (
-                    live_volume
-                    * partial_percent
-                    / Decimal("100")
-                )
 
                 result = self.executor.close_position(
                     db=db,
                     user_id=user_id,
                     position_ticket=position_ticket,
                     decision="PARTIAL_CLOSE",
-                    close_volume=close_volume,
+                    close_volume=requested_volume,
                 )
 
             else:
@@ -418,12 +517,17 @@ class AITradeManagementOrchestrationService:
                     decision="CLOSE_POSITION",
                 )
 
+            # Broker accepted the request, but live-state reconciliation
+            # has not yet proven the final result.
             action.status = "sent_reconciliation_required"
             action.retcode = result.retcode
             action.retcode_description = result.retcode_description
             action.message = result.message
 
-            db.flush()
+            # Persist this state BEFORE reconciliation so a crash between
+            # broker acceptance and reconciliation cannot cause a duplicate
+            # MT5 request.
+            db.commit()
 
         except (
             AITradeManagementExecutionError,
@@ -439,6 +543,72 @@ class AITradeManagementOrchestrationService:
             managed_position,
         )
 
+        if decision == "MOVE_SL":
+            target = proposed_stop_loss
+
+            action.status = (
+                "reconciled"
+                if (
+                    reconciliation["exists"]
+                    and target is not None
+                    and reconciliation["position"] is not None
+                    and reconciliation["position"].get("stop_loss")
+                    is not None
+                    and Decimal(
+                        str(
+                            reconciliation["position"]["stop_loss"]
+                        )
+                    ) == target
+                )
+                else "sent_reconciliation_required"
+            )
+
+        elif decision == "PARTIAL_CLOSE":
+            action.status = "sent_reconciliation_required"
+
+            if (
+                reconciliation["exists"]
+                and reconciliation["position"] is not None
+                and result.executed_volume is not None
+            ):
+                executed_volume = Decimal(
+                    str(result.executed_volume)
+                )
+
+                if executed_volume <= 0:
+                    raise AITradeManagementOrchestrationError(
+                        "Broker reported an invalid executed partial-close "
+                        "volume; reconciliation cannot safely continue."
+                    )
+
+                expected_volume = (
+                    pre_action_volume
+                    - executed_volume
+                )
+
+                live_volume = Decimal(
+                    str(
+                        reconciliation["position"]["volume"]
+                    )
+                )
+
+                if (
+                    expected_volume >= 0
+                    and abs(
+                        live_volume - expected_volume
+                    ) <= self.VOLUME_TOLERANCE
+                ):
+                    action.status = "reconciled"
+
+        elif decision == "CLOSE_POSITION":
+            action.status = (
+                "reconciled"
+                if not reconciliation["exists"]
+                else "sent_reconciliation_required"
+            )
+
+        # Keep the existing profile/evaluation context in the action
+        # response message without using it as proof of broker execution.
         if decision == "PARTIAL_CLOSE":
             if partial_percent is not None:
                 if (
@@ -446,7 +616,10 @@ class AITradeManagementOrchestrationService:
                     and partial_percent
                     == Decimal(str(profile.partial_2_percent))
                 ):
-                    profile_partial_2_trigger = profile.partial_2_trigger_r
+                    profile_partial_2_trigger = (
+                        profile.partial_2_trigger_r
+                    )
+
                     if profile_partial_2_trigger is not None:
                         profile_partial_2_trigger = Decimal(
                             str(profile_partial_2_trigger)
@@ -468,7 +641,10 @@ class AITradeManagementOrchestrationService:
                     and partial_percent
                     == Decimal(str(profile.partial_1_percent))
                 ):
-                    profile_partial_1_trigger = profile.partial_1_trigger_r
+                    profile_partial_1_trigger = (
+                        profile.partial_1_trigger_r
+                    )
+
                     if profile_partial_1_trigger is not None:
                         profile_partial_1_trigger = Decimal(
                             str(profile_partial_1_trigger)
@@ -484,19 +660,6 @@ class AITradeManagementOrchestrationService:
                             action.message
                             or ""
                         ) + " Partial-1 management action reconciled."
-
-        if decision == "MOVE_SL":
-            action.status = "reconciled" if reconciliation["exists"] else "sent_reconciliation_required"
-
-        elif decision == "PARTIAL_CLOSE":
-            action.status = "reconciled" if reconciliation["exists"] else "sent_reconciliation_required"
-
-        elif decision == "CLOSE_POSITION":
-            action.status = (
-                "reconciled"
-                if not reconciliation["exists"]
-                else "sent_reconciliation_required"
-            )
 
         db.commit()
 
