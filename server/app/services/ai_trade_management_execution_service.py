@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any
 
 import MetaTrader5 as mt5
@@ -252,15 +252,22 @@ class AITradeManagementExecutionService:
 
         steps = (
             volume / volume_step
-        ).to_integral_value()
+        ).to_integral_value(
+            rounding=ROUND_DOWN
+        )
 
         normalized = steps * volume_step
 
         if normalized < volume_min:
-            normalized = volume_min
+            raise AITradeManagementExecutionError(
+                "Requested management volume is below the broker minimum "
+                "after broker-step normalization."
+            )
 
         if normalized > volume_max:
-            normalized = volume_max
+            raise AITradeManagementExecutionError(
+                "Normalized management volume exceeds the broker maximum."
+            )
 
         return normalized
 
@@ -620,19 +627,42 @@ class AITradeManagementExecutionService:
         self,
         info,
     ) -> int:
-        filling_mode = getattr(
+        """
+        Convert MT5 symbol filling-permission flags into the
+        ORDER_FILLING_* enum required by order_send().
+
+        info.filling_mode is a permission bitmask. It must never
+        be returned directly as an ORDER_FILLING_* value.
+        """
+
+        execution_mode = getattr(
             info,
-            "filling_mode",
+            "trade_exemode",
             None,
         )
 
-        if filling_mode is not None:
-            try:
-                return int(filling_mode)
-            except (TypeError, ValueError):
-                pass
+        filling_flags = int(
+            getattr(
+                info,
+                "filling_mode",
+                0,
+            )
+            or 0
+        )
 
-        return mt5.ORDER_FILLING_RETURN
+        if execution_mode != mt5.SYMBOL_TRADE_EXECUTION_MARKET:
+            return mt5.ORDER_FILLING_RETURN
+
+        if filling_flags & mt5.SYMBOL_FILLING_FOK:
+            return mt5.ORDER_FILLING_FOK
+
+        if filling_flags & mt5.SYMBOL_FILLING_IOC:
+            return mt5.ORDER_FILLING_IOC
+
+        raise AITradeManagementExecutionError(
+            "The broker does not advertise a supported filling mode "
+            "for this Market Execution symbol."
+        )
 
     def _build_close_request(
         self,
@@ -682,7 +712,19 @@ class AITradeManagementExecutionService:
         )
 
         if normalized_volume > live_volume:
-            normalized_volume = live_volume
+            raise AITradeManagementExecutionError(
+                "Normalized close volume exceeds the live "
+                "position volume."
+            )
+
+        if (
+            close_volume < live_volume
+            and normalized_volume >= live_volume
+        ):
+            raise AITradeManagementExecutionError(
+                "Partial-close volume would close the entire "
+                "live position after broker-step normalization."
+            )
 
         tick = mt5.symbol_info_tick(
             str(live_position["symbol"])
@@ -1126,3 +1168,4 @@ class AITradeManagementExecutionService:
 ai_trade_management_execution_service = (
     AITradeManagementExecutionService()
 )
+
