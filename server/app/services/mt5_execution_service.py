@@ -54,6 +54,12 @@ class MT5ExecutionResult:
 
     execution_sent: bool = False
 
+    execution_mode: str = "market"
+    order_type: str = "MARKET"
+    pending_order_status: str = "not_applicable"
+    pending_order_placed_at: Optional[str] = None
+    filled_position_ticket: Optional[int] = None
+
     message: str = ""
 
     def serialize(self) -> dict[str, Any]:
@@ -70,6 +76,11 @@ class MT5ExecutionResult:
             "execution_price": self._number(
                 self.execution_price
             ),
+            "execution_mode": self.execution_mode,
+            "order_type": self.order_type,
+            "pending_order_status": self.pending_order_status,
+            "pending_order_placed_at": self.pending_order_placed_at,
+            "filled_position_ticket": self.filled_position_ticket,
             "stop_loss": self._number(self.stop_loss),
             "take_profit": self._number(self.take_profit),
             "signal_price_deviation": self._number(
@@ -343,6 +354,78 @@ class MT5ExecutionService:
             2,
         )
 
+    def _classify_order_type(
+        self,
+        *,
+        direction: str,
+        requested_entry: Decimal,
+        ask: Decimal,
+        bid: Decimal,
+        tolerance: Decimal,
+    ) -> tuple[str, str]:
+        """
+        Classify the requested entry against the current executable price.
+
+        BUY:
+          requested ~= Ask -> MARKET
+          requested > Ask  -> BUY_STOP
+          requested < Ask  -> BUY_LIMIT
+
+        SELL:
+          requested ~= Bid -> MARKET
+          requested < Bid  -> SELL_STOP
+          requested > Bid  -> SELL_LIMIT
+        """
+
+        if direction == "buy":
+            market_price = ask
+
+            if abs(requested_entry - market_price) <= tolerance:
+                return "market", "MARKET"
+
+            if requested_entry > market_price:
+                return "pending", "BUY_STOP"
+
+            return "pending", "BUY_LIMIT"
+
+        market_price = bid
+
+        if abs(requested_entry - market_price) <= tolerance:
+            return "market", "MARKET"
+
+        if requested_entry < market_price:
+            return "pending", "SELL_STOP"
+
+        return "pending", "SELL_LIMIT"
+
+    def _mt5_order_type(
+        self,
+        *,
+        direction: str,
+        execution_mode: str,
+        order_type_name: str,
+    ) -> int:
+        if execution_mode == "market":
+            return (
+                mt5.ORDER_TYPE_BUY
+                if direction == "buy"
+                else mt5.ORDER_TYPE_SELL
+            )
+
+        mapping = {
+            "BUY_LIMIT": mt5.ORDER_TYPE_BUY_LIMIT,
+            "BUY_STOP": mt5.ORDER_TYPE_BUY_STOP,
+            "SELL_LIMIT": mt5.ORDER_TYPE_SELL_LIMIT,
+            "SELL_STOP": mt5.ORDER_TYPE_SELL_STOP,
+        }
+
+        try:
+            return mapping[order_type_name]
+        except KeyError as exc:
+            raise MT5ExecutionError(
+                f"Unsupported pending order type: {order_type_name}"
+            ) from exc
+
     def execute(
         self,
         *,
@@ -601,13 +684,86 @@ class MT5ExecutionService:
                 ),
             )
 
-        if normalized_direction == "buy":
-            execution_price = Decimal(
-                str(tick.ask)
+        ask_price = Decimal(str(tick.ask))
+        bid_price = Decimal(str(tick.bid))
+
+        if ask_price <= 0 or bid_price <= 0:
+            return MT5ExecutionResult(
+                approved=False,
+                status="invalid_execution_price",
+                symbol=application_symbol,
+                broker_symbol=broker_symbol,
+                direction=normalized_direction,
+                volume=requested_volume,
+                requested_entry_price=signal_entry,
+                execution_price=None,
+                stop_loss=requested_stop_loss,
+                take_profit=requested_take_profit,
+                signal_price_deviation=None,
+                signal_price_deviation_percent=None,
+                errors=[
+                    "Broker returned invalid bid/ask prices."
+                ],
+                execution_sent=False,
+                message=(
+                    "Execution blocked because the broker returned "
+                    "invalid bid/ask prices."
+                ),
+            )
+
+        tick_size = Decimal(
+            str(
+                getattr(
+                    symbol_info,
+                    "trade_tick_size",
+                    0,
+                )
+                or getattr(
+                    symbol_info,
+                    "point",
+                    0,
+                )
+                or "0.00000001"
+            )
+        )
+
+        if tick_size <= 0:
+            tick_size = Decimal("0.00000001")
+
+        execution_mode, order_type_name = (
+            self._classify_order_type(
+                direction=normalized_direction,
+                requested_entry=signal_entry,
+                ask=ask_price,
+                bid=bid_price,
+                tolerance=tick_size,
+            )
+        )
+
+        if execution_mode == "market":
+            execution_price = (
+                ask_price
+                if normalized_direction == "buy"
+                else bid_price
             )
         else:
-            execution_price = Decimal(
-                str(tick.bid)
+            execution_price = signal_entry
+
+        checks = list(validation.checks)
+        warnings = list(validation.warnings)
+        errors: list[str] = []
+
+        checks.append(
+            f"Entry classified as {order_type_name}"
+        )
+
+        if execution_mode == "pending":
+            checks.append(
+                "Requested entry will be used as the exact pending-order activation price"
+            )
+        else:
+            checks.append(
+                "Requested entry is effectively at market and will execute immediately"
             )
 
         if execution_price <= 0:
@@ -641,16 +797,13 @@ class MT5ExecutionService:
             )
         )
 
-        checks = list(validation.checks)
-        warnings = list(validation.warnings)
-        errors: list[str] = []
-
         checks.append(
             "Fresh execution tick received immediately before order submission"
         )
 
         if (
-            deviation_percent
+            execution_mode == "market"
+            and deviation_percent
             > self.MAX_SIGNAL_PRICE_DEVIATION_PERCENT
         ):
             errors.append(
@@ -793,10 +946,16 @@ class MT5ExecutionService:
         # CALCULATE FINAL MARGIN
         # ---------------------------------------------------------
 
-        order_type = (
-            mt5.ORDER_TYPE_BUY
-            if normalized_direction == "buy"
-            else mt5.ORDER_TYPE_SELL
+        order_type = self._mt5_order_type(
+            direction=normalized_direction,
+            execution_mode=execution_mode,
+            order_type_name=order_type_name,
+        )
+
+        margin_price = (
+            signal_entry
+            if execution_mode == "pending"
+            else execution_price
         )
 
         margin_required_raw = (
@@ -804,7 +963,7 @@ class MT5ExecutionService:
                 order_type,
                 broker_symbol,
                 float(requested_volume),
-                float(execution_price),
+                float(margin_price),
             )
         )
 
@@ -986,16 +1145,29 @@ class MT5ExecutionService:
         # BUILD MT5 REQUEST
         # ---------------------------------------------------------
 
-        filling_mode = self._select_filling_mode(
-            symbol_info
-        )
+        if execution_mode == "pending":
+            filling_mode = mt5.ORDER_FILLING_RETURN
+            trade_action = mt5.TRADE_ACTION_PENDING
+            request_price = signal_entry
+            checks.append(
+                "MT5 pending-order request constructed"
+            )
+        else:
+            filling_mode = self._select_filling_mode(
+                symbol_info
+            )
+            trade_action = mt5.TRADE_ACTION_DEAL
+            request_price = execution_price
+            checks.append(
+                "MT5 market-order request constructed"
+            )
 
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
+            "action": trade_action,
             "symbol": broker_symbol,
             "volume": float(requested_volume),
             "type": order_type,
-            "price": float(execution_price),
+            "price": float(request_price),
             "sl": float(requested_stop_loss),
             "tp": float(requested_take_profit),
             "deviation": 20,
@@ -1004,10 +1176,6 @@ class MT5ExecutionService:
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": filling_mode,
         }
-
-        checks.append(
-            "MT5 market-order request constructed"
-        )
 
         # ---------------------------------------------------------
         # FINAL PRE-SEND CHECK
@@ -1045,25 +1213,36 @@ class MT5ExecutionService:
                 ),
             )
 
-        final_execution_price = (
-            Decimal(
-                str(
-                    final_tick.ask
-                    if normalized_direction == "buy"
-                    else final_tick.bid
+        if execution_mode == "pending":
+            # Pending orders keep the user's requested activation price.
+            final_execution_price = signal_entry
+            final_deviation = None
+            final_deviation_percent = None
+
+            checks.append(
+                "Pending entry price preserved exactly as requested"
+            )
+        else:
+            final_execution_price = (
+                Decimal(
+                    str(
+                        final_tick.ask
+                        if normalized_direction == "buy"
+                        else final_tick.bid
+                    )
                 )
             )
-        )
 
-        final_deviation, final_deviation_percent = (
-            self._calculate_deviation(
-                signal_entry,
-                final_execution_price,
+            final_deviation, final_deviation_percent = (
+                self._calculate_deviation(
+                    signal_entry,
+                    final_execution_price,
+                )
             )
-        )
 
         if (
-            final_deviation_percent
+            execution_mode == "market"
+            and final_deviation_percent
             > self.MAX_SIGNAL_PRICE_DEVIATION_PERCENT
         ):
             return MT5ExecutionResult(
@@ -1094,16 +1273,26 @@ class MT5ExecutionService:
                 ),
             )
 
-        # Use the freshest price in the actual request.
-        request["price"] = float(
-            final_execution_price.quantize(
-                Decimal("1").scaleb(-digits)
+        if execution_mode == "market":
+            request["price"] = float(
+                final_execution_price.quantize(
+                    Decimal("1").scaleb(-digits)
+                )
             )
-        )
 
-        checks.append(
-            "Final market price confirmed immediately before order_send"
-        )
+            checks.append(
+                "Final market price confirmed immediately before order_send"
+            )
+        else:
+            request["price"] = float(
+                signal_entry.quantize(
+                    Decimal("1").scaleb(-digits)
+                )
+            )
+
+            checks.append(
+                "Pending activation price confirmed immediately before order_send"
+            )
 
         # ---------------------------------------------------------
         # SEND ORDER
@@ -1354,13 +1543,35 @@ class MT5ExecutionService:
 
         return MT5ExecutionResult(
             approved=True,
-            status="executed",
+            status=(
+                "pending_order_placed"
+                if execution_mode == "pending"
+                else "executed"
+            ),
             symbol=application_symbol,
             broker_symbol=broker_symbol,
             direction=normalized_direction,
             volume=requested_volume,
             requested_entry_price=signal_entry,
-            execution_price=final_execution_price,
+            execution_price=(
+                None
+                if execution_mode == "pending"
+                else final_execution_price
+            ),
+            execution_mode=execution_mode,
+            order_type=order_type_name,
+            pending_order_status=(
+                "placed"
+                if execution_mode == "pending"
+                else "not_applicable"
+            ),
+            pending_order_placed_at=(
+                __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ).isoformat()
+                if execution_mode == "pending"
+                else None
+            ),
             stop_loss=requested_stop_loss,
             take_profit=requested_take_profit,
             signal_price_deviation=final_deviation,
@@ -1399,7 +1610,9 @@ class MT5ExecutionService:
             errors=[],
             execution_sent=True,
             message=(
-                "Trade executed successfully through MetaTrader 5."
+                "Pending order placed successfully through MetaTrader 5."
+                if execution_mode == "pending"
+                else "Trade executed successfully through MetaTrader 5."
             ),
         )
 

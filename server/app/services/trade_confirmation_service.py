@@ -41,6 +41,11 @@ class TradeConfirmationResult:
     volume: Decimal | None
     requested_entry_price: Decimal | None
     execution_price: Decimal | None
+    execution_mode: str | None
+    order_type: str | None
+    pending_order_status: str | None
+    pending_order_placed_at: datetime | None
+    filled_position_ticket: int | None
     stop_loss: Decimal | None
     take_profit: Decimal | None
     signal_price_deviation: Decimal | None
@@ -85,6 +90,15 @@ class TradeConfirmationResult:
                 if self.execution_price is not None
                 else None
             ),
+            "execution_mode": self.execution_mode,
+            "order_type": self.order_type,
+            "pending_order_status": self.pending_order_status,
+            "pending_order_placed_at": (
+                self.pending_order_placed_at.isoformat()
+                if self.pending_order_placed_at is not None
+                else None
+            ),
+            "filled_position_ticket": self.filled_position_ticket,
             "stop_loss": (
                 float(self.stop_loss)
                 if self.stop_loss is not None
@@ -250,6 +264,31 @@ class TradeConfirmationService:
             ),
             execution_price=(
                 intent.execution_price
+                if intent
+                else None
+            ),
+            execution_mode=(
+                getattr(intent, "execution_mode", None)
+                if intent
+                else None
+            ),
+            order_type=(
+                getattr(intent, "order_type", None)
+                if intent
+                else None
+            ),
+            pending_order_status=(
+                getattr(intent, "pending_order_status", None)
+                if intent
+                else None
+            ),
+            pending_order_placed_at=(
+                getattr(intent, "pending_order_placed_at", None)
+                if intent
+                else None
+            ),
+            filled_position_ticket=(
+                getattr(intent, "filled_position_ticket", None)
                 if intent
                 else None
             ),
@@ -618,11 +657,71 @@ class TradeConfirmationService:
                 signal_deviation_percent
             )
 
+        execution_mode = getattr(
+            execution_result,
+            "execution_mode",
+            getattr(intent, "execution_mode", "market"),
+        )
+
+        order_type = getattr(
+            execution_result,
+            "order_type",
+            getattr(intent, "order_type", "MARKET"),
+        )
+
+        pending_order_status = getattr(
+            execution_result,
+            "pending_order_status",
+            getattr(intent, "pending_order_status", "not_applicable"),
+        )
+
+        intent.execution_mode = execution_mode
+        intent.order_type = order_type
+        intent.pending_order_status = pending_order_status
+
         # ---------------------------------------------------------
-        # Successful execution
+        # Successful pending-order placement
         # ---------------------------------------------------------
 
-        if execution_approved and execution_sent:
+        if (
+            execution_approved
+            and execution_sent
+            and execution_mode == "pending"
+        ):
+            intent.confirmation_status = "confirmed"
+            intent.execution_status = "pending_order_placed"
+            intent.pending_order_status = "placed"
+            intent.pending_order_placed_at = now
+            intent.execution_price = None
+            intent.deal_ticket = None
+            intent.filled_position_ticket = None
+
+            intent.order_ticket = getattr(
+                execution_result,
+                "order_ticket",
+                None,
+            )
+
+            intent.retcode = getattr(
+                execution_result,
+                "retcode",
+                None,
+            )
+
+            intent.retcode_description = getattr(
+                execution_result,
+                "retcode_description",
+                None,
+            )
+
+            intent.execution_time = None
+            intent.error_message = None
+
+        # ---------------------------------------------------------
+        # Successful market execution
+        # ---------------------------------------------------------
+
+        elif execution_approved and execution_sent:
 
             intent.confirmation_status = "confirmed"
             intent.execution_status = "execution_reconciliation_required"
@@ -1484,6 +1583,78 @@ class TradeConfirmationService:
                 False,
             )
         )
+
+        if (
+            execution_approved
+            and execution_sent
+            and getattr(
+                execution_result,
+                "execution_mode",
+                getattr(intent, "execution_mode", "market"),
+            ) == "pending"
+        ):
+            intent = self._load_owned_intent(
+                db,
+                intent.id,
+                user_id,
+            )
+
+            if intent is None:
+                raise TradeConfirmationError(
+                    "Trade intent disappeared after pending order placement."
+                )
+
+            return self._build_result(
+                intent,
+                approved=True,
+                status="pending_order_placed",
+                checks=checks,
+                warnings=warnings,
+                errors=[],
+                order_ticket=getattr(
+                    execution_result,
+                    "order_ticket",
+                    intent.order_ticket,
+                ),
+                deal_ticket=None,
+                retcode=getattr(
+                    execution_result,
+                    "retcode",
+                    intent.retcode,
+                ),
+                retcode_description=getattr(
+                    execution_result,
+                    "retcode_description",
+                    intent.retcode_description,
+                ),
+                margin_required=getattr(
+                    execution_result,
+                    "margin_required",
+                    intent.margin_required,
+                ),
+                free_margin=getattr(
+                    execution_result,
+                    "free_margin",
+                    intent.free_margin,
+                ),
+                risk_amount=getattr(
+                    execution_result,
+                    "risk_amount",
+                    None,
+                ),
+                risk_percent=getattr(
+                    execution_result,
+                    "risk_percent",
+                    intent.risk_percent,
+                ),
+                signal_price_deviation=None,
+                signal_price_deviation_percent=None,
+                execution_sent=True,
+                message=(
+                    "Pending order was accepted by MetaTrader 5 "
+                    "and is waiting for activation."
+                ),
+            )
 
         if execution_approved and execution_sent:
 
