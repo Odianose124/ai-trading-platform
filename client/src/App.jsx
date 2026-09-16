@@ -483,12 +483,37 @@ function CommandCenter() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const preferredTimeframe =
+    tradingSettings?.preferred_timeframe || "15m";
+
+  const preferredTimeframeLabels = {
+    "1m": "1 Minute",
+    "5m": "5 Minutes",
+    "15m": "15 Minutes",
+    "1h": "1 Hour",
+    "4h": "4 Hours",
+  };
+
+  const preferredTimeframeLabel =
+    preferredTimeframeLabels[preferredTimeframe] ||
+    preferredTimeframe;
+
+
   useEffect(() => {
     let mounted = true;
 
     async function loadCommandCenter() {
       try {
         setError("");
+
+        const settingsResponse = await api.get(
+          "/api/settings",
+        );
+
+        const preferredTimeframe =
+          settingsResponse?.data?.preferred_timeframe ||
+          "15m";
+
 
         const [
           priceResponse,
