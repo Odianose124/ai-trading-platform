@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -14,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import api from "./services/api";
-import TradeReviewPanel from "./TradeReviewPanel";
+import ManualTradeSetup from "./ManualTradeSetup";
 import "./trading.css";
 
 const SYMBOL = "XAUUSD";
@@ -685,16 +685,7 @@ function TradingPage() {
         </div>
       </section>
 
-      <TradeReviewPanel
-        setup={setup}
-        isTradeReady={isTradeReady}
-        defaultRiskPercent={
-          tradingSettings?.risk_percent ?? 1
-        }
-        maxRiskPercent={
-          tradingSettings?.max_risk_percent ?? 2
-        }
-      />
+      <ManualTradeSetup />
       <div className="trading-bottom-safety">
         <ShieldCheck size={19} />
 
@@ -881,4 +872,3 @@ function formatConfirmation(value) {
 }
 
 export default TradingPage;
-

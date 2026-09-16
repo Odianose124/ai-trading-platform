@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.connection import Base
@@ -63,6 +63,12 @@ class TradeIntent(Base):
     risk_percent: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(10, 4),
         nullable=True,
+    )
+
+    ai_management_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
     )
 
     preview_status: Mapped[str] = mapped_column(

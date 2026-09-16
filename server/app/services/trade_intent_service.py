@@ -28,6 +28,7 @@ class TradeIntentResult:
     stop_loss: Decimal | None
     take_profit: Decimal | None
     risk_percent: Decimal | None
+    ai_management_enabled: bool
     expires_at: datetime | None
     checks: list[str]
     warnings: list[str]
@@ -73,6 +74,7 @@ class TradeIntentResult:
                 if self.risk_percent is not None
                 else None
             ),
+            "ai_management_enabled": self.ai_management_enabled,
             "expires_at": (
                 self.expires_at.isoformat()
                 if self.expires_at is not None
@@ -142,6 +144,9 @@ class TradeIntentService:
             stop_loss=intent.stop_loss,
             take_profit=intent.take_profit,
             risk_percent=intent.risk_percent,
+            ai_management_enabled=bool(
+                intent.ai_management_enabled
+            ),
             expires_at=intent.expires_at,
             checks=checks or [],
             warnings=warnings or [],
@@ -162,6 +167,7 @@ class TradeIntentService:
         stop_loss,
         take_profit,
         risk_percent=None,
+        ai_management_enabled: bool = True,
         signal_price_deviation_percent=None,
         margin_required=None,
         free_margin=None,
@@ -359,6 +365,7 @@ class TradeIntentService:
             stop_loss=stop_loss_decimal,
             take_profit=take_profit_decimal,
             risk_percent=risk_decimal,
+            ai_management_enabled=bool(ai_management_enabled),
             preview_status=preview_status,
             confirmation_status="pending",
             execution_status="not_executed",
@@ -384,6 +391,7 @@ class TradeIntentService:
             "Stop loss geometry validated",
             "Take profit geometry validated",
             "Trade intent stored server-side",
+            "AI management preference recorded server-side",
             "Trade intent expiration recorded",
         ]
 

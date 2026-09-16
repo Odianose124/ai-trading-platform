@@ -788,6 +788,7 @@ class PositionReconciliationService:
         self,
         db: Session,
         managed_position: ManagedPosition,
+        ai_management_enabled: bool,
     ) -> ManagementProfile:
         """
         Create the immutable management snapshot.
@@ -807,7 +808,7 @@ class PositionReconciliationService:
         profile = ManagementProfile(
             managed_position_id=managed_position.id,
             profile_name="Pending Configuration",
-            ai_management_enabled=False,
+            ai_management_enabled=bool(ai_management_enabled),
 
             break_even_enabled=False,
             break_even_trigger_r=None,
@@ -846,6 +847,7 @@ class PositionReconciliationService:
         self,
         db: Session,
         managed_position: ManagedPosition,
+        ai_management_enabled: bool,
     ) -> ManagementProfile:
         existing = (
             db.query(ManagementProfile)
@@ -862,6 +864,7 @@ class PositionReconciliationService:
         return self._create_management_profile(
             db,
             managed_position,
+            ai_management_enabled,
         )
 
     # ==============================================================
@@ -1173,6 +1176,7 @@ class PositionReconciliationService:
         management_profile = self._ensure_management_profile(
             db,
             managed_position,
+            bool(intent.ai_management_enabled),
         )
 
         if management_profile is not None:

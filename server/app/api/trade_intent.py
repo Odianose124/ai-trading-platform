@@ -33,6 +33,7 @@ class CreateTradeIntentRequest(BaseModel):
         gt=0,
         le=100,
     )
+    ai_management_enabled: bool = True
     signal_price_deviation_percent: Decimal | None = Field(
         default=None,
         ge=0,
@@ -72,6 +73,7 @@ def create_trade_intent(
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             risk_percent=request.risk_percent,
+            ai_management_enabled=request.ai_management_enabled,
             signal_price_deviation_percent=(
                 request.signal_price_deviation_percent
             ),
