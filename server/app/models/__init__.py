@@ -8,6 +8,7 @@ from app.models.candle import Candle
 from app.models.mt5_trading_account import MT5TradingAccount
 from app.models.managed_position import ManagedPosition
 from app.models.management_profile import ManagementProfile
+from app.models.ai_management_action import AIManagementAction
 
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "MT5TradingAccount",
     "ManagedPosition",
     "ManagementProfile",
+    "AIManagementAction",
 ]
