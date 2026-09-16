@@ -118,7 +118,7 @@ class PositionReconciliationService:
     """
 
     VOLUME_TOLERANCE = Decimal("0.00000001")
-    PRICE_TOLERANCE = Decimal("0.00000001")
+    DEFAULT_PRICE_TOLERANCE = Decimal("0.00000001")
 
     def __init__(
         self,
@@ -174,6 +174,56 @@ class PositionReconciliationService:
             return False
 
         return abs(left_decimal - right_decimal) <= tolerance
+
+    @classmethod
+    def _price_tolerance(
+        cls,
+        broker_symbol: str | None,
+    ) -> Decimal:
+        """
+        Determine a safe comparison tolerance from the actual MT5 symbol
+        precision.
+
+        MT5 may normalize submitted prices to the broker's configured
+        number of digits. Reconciliation must therefore compare values
+        at broker precision rather than requiring a mathematically exact
+        decimal match.
+
+        The fallback remains deliberately small if symbol metadata cannot
+        be read.
+        """
+
+        symbol = (
+            str(broker_symbol or "").strip()
+        )
+
+        if not symbol:
+            return cls.DEFAULT_PRICE_TOLERANCE
+
+        try:
+            info = mt5.symbol_info(symbol)
+        except Exception:
+            info = None
+
+        if info is None:
+            return cls.DEFAULT_PRICE_TOLERANCE
+
+        digits = getattr(info, "digits", None)
+
+        try:
+            digits = int(digits)
+        except (TypeError, ValueError):
+            return cls.DEFAULT_PRICE_TOLERANCE
+
+        if digits < 0:
+            return cls.DEFAULT_PRICE_TOLERANCE
+
+        tolerance = Decimal("1").scaleb(-digits)
+
+        if tolerance <= Decimal("0"):
+            return cls.DEFAULT_PRICE_TOLERANCE
+
+        return tolerance
 
     # ==============================================================
     # Result helpers
@@ -433,6 +483,10 @@ class PositionReconciliationService:
             position.get("symbol") or ""
         ).strip()
 
+        price_tolerance = self._price_tolerance(
+            actual_symbol or expected_symbol
+        )
+
         if actual_symbol.upper() != expected_symbol.upper():
             errors.append(
                 "Reconciled position symbol does not match the trade intent."
@@ -481,7 +535,7 @@ class PositionReconciliationService:
             if not self._decimal_equal(
                 expected_entry,
                 actual_entry,
-                self.PRICE_TOLERANCE,
+                price_tolerance,
             ):
                 errors.append(
                     "Reconciled position entry price does not match "
@@ -512,7 +566,7 @@ class PositionReconciliationService:
             elif not self._decimal_equal(
                 expected_sl,
                 actual_sl,
-                self.PRICE_TOLERANCE,
+                price_tolerance,
             ):
                 errors.append(
                     "Reconciled position stop loss does not match "
@@ -539,7 +593,7 @@ class PositionReconciliationService:
             elif not self._decimal_equal(
                 expected_tp,
                 actual_tp,
-                self.PRICE_TOLERANCE,
+                price_tolerance,
             ):
                 errors.append(
                     "Reconciled position take profit does not match "
