@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+﻿from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -12,6 +12,9 @@ class Settings(BaseSettings):
 
     BINANCE_SPOT_WS_URL: str = "wss://stream.binance.com:9443/ws"
     MARKET_DATA_RECONNECT_DELAY_SECONDS: int = 5
+
+    MT5_RUNTIME_ROOT: str | None = None
+    MT5_TERMINAL_EXECUTABLE: str = "terminal64.exe"
 
     class Config:
         env_file = ".env"
