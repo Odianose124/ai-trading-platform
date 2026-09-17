@@ -1,4 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -940,20 +944,49 @@ class MT5ExecutionService:
         # ---------------------------------------------------------
 
         order_type = self._mt5_order_type(
-            direction=normalized_direction,
-            execution_mode=execution_mode,
-            order_type_name=order_type_name,
-        )
+    direction=normalized_direction,
+    execution_mode=execution_mode,
+    order_type_name=order_type_name,
+)
 
-        margin_price = (
-            signal_entry
-            if execution_mode == "pending"
-            else execution_price
-        )
+        # ---------------------------------------------------------
+        # MT5 MARGIN ESTIMATION
+        # ---------------------------------------------------------
+        # MT5 may return 0.0 for order_calc_margin() when the
+        # supplied order type is a pending order such as SELL_LIMIT.
+        #
+        # For risk/margin validation, calculate the equivalent
+        # market-order margin instead. This estimates the margin
+        # required for the position without changing the actual
+        # pending order that will be submitted later.
+        #
+        # The actual execution request remains the original
+        # pending order with the exact requested activation price.
+
+        if execution_mode == "pending":
+            margin_order_type = (
+                mt5.ORDER_TYPE_BUY
+                if normalized_direction == "buy"
+                else mt5.ORDER_TYPE_SELL
+            )
+
+            margin_price = (
+                ask_price
+                if normalized_direction == "buy"
+                else bid_price
+            )
+
+            checks.append(
+                "Pending-order margin calculated using equivalent "
+                "market-order margin"
+            )
+        else:
+            margin_order_type = order_type
+            margin_price = execution_price
 
         margin_required_raw = (
             mt5.order_calc_margin(
-                order_type,
+                margin_order_type,
                 broker_symbol,
                 float(requested_volume),
                 float(margin_price),
@@ -966,10 +999,7 @@ class MT5ExecutionService:
             else None
         )
 
-        if (
-            margin_required is None
-            or margin_required <= 0
-        ):
+        if margin_required is None:
             return MT5ExecutionResult(
                 approved=False,
                 status="margin_calculation_failed",
@@ -1336,7 +1366,9 @@ class MT5ExecutionService:
         # ---------------------------------------------------------
         # order_check() validates the exact request with the broker
         # without sending the trade.
+        logger.warning("MT5 PREFLIGHT REQUEST symbol=%s action=%s type=%s volume=%s price=%s sl=%s tp=%s filling=%s execution_mode=%s trade_exemode=%s", broker_symbol, request.get("action"), request.get("type"), request.get("volume"), request.get("price"), request.get("sl"), request.get("tp"), request.get("type_filling"), execution_mode, trade_exemode)
         preflight = mt5.order_check(request)
+        logger.warning("MT5 PREFLIGHT RESULT retcode=%s comment=%s last_error=%s", getattr(preflight, "retcode", None) if preflight is not None else None, getattr(preflight, "comment", None) if preflight is not None else None, mt5.last_error())
 
         if preflight is None:
             return MT5ExecutionResult(
@@ -1415,9 +1447,15 @@ class MT5ExecutionService:
         # SEND ORDER
         # ---------------------------------------------------------
 
+        logger.warning("MT5 ORDER_SEND REQUEST symbol=%s action=%s type=%s volume=%s price=%s sl=%s tp=%s filling=%s execution_mode=%s trade_exemode=%s", broker_symbol, request.get("action"), request.get("type"), request.get("volume"), request.get("price"), request.get("sl"), request.get("tp"), request.get("type_filling"), execution_mode, trade_exemode)
+
         result = mt5.order_send(
+
             request
+
         )
+
+        logger.warning("MT5 ORDER_SEND RESULT retcode=%s comment=%s order=%s deal=%s last_error=%s", getattr(result, "retcode", None) if result is not None else None, getattr(result, "comment", None) if result is not None else None, getattr(result, "order", None) if result is not None else None, getattr(result, "deal", None) if result is not None else None, mt5.last_error())
 
         if result is None:
             error_code, error_message = (
@@ -1652,5 +1690,8 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
+
+
+
 
 
