@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import api from "./services/api";
 
-function formatNumber(value, digits = 2) {
+function number(value, digits = 5) {
   if (
     value === null ||
     value === undefined ||
@@ -32,7 +32,7 @@ function formatNumber(value, digits = 2) {
   });
 }
 
-function formatMoney(value) {
+function money(value) {
   if (
     value === null ||
     value === undefined ||
@@ -42,57 +42,75 @@ function formatMoney(value) {
     return "--";
   }
 
-  const numericValue = Number(value);
+  const amount = Number(value);
 
-  return `${numericValue < 0 ? "-" : ""}$${Math.abs(
-    numericValue,
-  ).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `${amount < 0 ? "-" : ""}$${Math.abs(amount).toLocaleString(
+    undefined,
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    },
+  )}`;
 }
 
-function formatDate(value) {
+function dateTime(value) {
   if (!value) {
     return "--";
   }
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "--";
-  }
-
-  return date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? "--"
+    : date.toLocaleString();
 }
 
-function PositionTypeBadge({ type }) {
-  const isBuy = type === "buy";
+function Badge({ children, tone = "neutral" }) {
+  const tones = {
+    buy: {
+      color: "#22c55e",
+      background: "rgba(34,197,94,.12)",
+    },
+    sell: {
+      color: "#ef4444",
+      background: "rgba(239,68,68,.12)",
+    },
+    pending: {
+      color: "#f59e0b",
+      background: "rgba(245,158,11,.12)",
+    },
+    live: {
+      color: "#38bdf8",
+      background: "rgba(56,189,248,.12)",
+    },
+    success: {
+      color: "#22c55e",
+      background: "rgba(34,197,94,.12)",
+    },
+    neutral: {
+      color: "#94a3b8",
+      background: "rgba(148,163,184,.10)",
+    },
+  };
+
+  const selected = tones[tone] || tones.neutral;
 
   return (
     <span
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: "6px",
+        gap: 6,
         padding: "6px 10px",
-        borderRadius: "999px",
-        background: isBuy
-          ? "rgba(34, 197, 94, 0.12)"
-          : "rgba(239, 68, 68, 0.12)",
-        color: isBuy ? "#22c55e" : "#ef4444",
-        fontSize: "12px",
-        fontWeight: 700,
+        borderRadius: 999,
+        color: selected.color,
+        background: selected.background,
+        fontSize: 11,
+        fontWeight: 800,
         textTransform: "uppercase",
       }}
     >
-      {isBuy ? (
-        <ArrowUpRight size={14} />
-      ) : (
-        <ArrowDownRight size={14} />
-      )}
-
-      {isBuy ? "Buy" : "Sell"}
+      {children}
     </span>
   );
 }
@@ -102,16 +120,19 @@ function Metric({ label, value }) {
     <div
       style={{
         background: "#020617",
-        borderRadius: "12px",
-        padding: "12px",
+        border: "1px solid rgba(148,163,184,.08)",
+        borderRadius: 12,
+        padding: 12,
       }}
     >
       <span
         style={{
           display: "block",
           color: "#64748b",
-          fontSize: "11px",
-          marginBottom: "6px",
+          fontSize: 10,
+          marginBottom: 6,
+          textTransform: "uppercase",
+          letterSpacing: ".05em",
         }}
       >
         {label}
@@ -120,7 +141,7 @@ function Metric({ label, value }) {
       <strong
         style={{
           color: "#e2e8f0",
-          fontSize: "14px",
+          fontSize: 14,
         }}
       >
         {value}
@@ -129,689 +150,25 @@ function Metric({ label, value }) {
   );
 }
 
-function SummaryCard({
-  icon: Icon,
-  label,
-  value,
-  accent = "#94a3b8",
-}) {
-  return (
-    <div
-      style={{
-        background: "#0f172a",
-        border:
-          "1px solid rgba(148, 163, 184, 0.14)",
-        borderRadius: "16px",
-        padding: "18px",
-        display: "flex",
-        alignItems: "center",
-        gap: "14px",
-      }}
-    >
-      <div
-        style={{
-          width: "42px",
-          height: "42px",
-          borderRadius: "12px",
-          display: "grid",
-          placeItems: "center",
-          background: `${accent}18`,
-          color: accent,
-        }}
-      >
-        <Icon size={20} />
-      </div>
-
-      <div>
-        <span
-          style={{
-            display: "block",
-            color: "#64748b",
-            fontSize: "11px",
-            marginBottom: "4px",
-          }}
-        >
-          {label}
-        </span>
-
-        <strong
-          style={{
-            color: "#f8fafc",
-            fontSize: "18px",
-          }}
-        >
-          {value}
-        </strong>
-      </div>
-    </div>
-  );
-}
-
-function DecisionBadge({ decision }) {
-  const configuration = {
-    HOLD: {
-      color: "#94a3b8",
-      background: "rgba(148, 163, 184, 0.10)",
-      icon: Clock3,
-    },
-    MOVE_SL: {
-      color: "#38bdf8",
-      background: "rgba(56, 189, 248, 0.10)",
-      icon: ShieldCheck,
-    },
-    PARTIAL_CLOSE: {
-      color: "#f59e0b",
-      background: "rgba(245, 158, 11, 0.10)",
-      icon: TrendingDown,
-    },
-    CLOSE_POSITION: {
-      color: "#ef4444",
-      background: "rgba(239, 68, 68, 0.10)",
-      icon: XCircle,
-    },
-  };
-
-  const config =
-    configuration[decision] ||
-    configuration.HOLD;
-
-  const Icon = config.icon;
-
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "7px",
-        padding: "7px 11px",
-        borderRadius: "999px",
-        color: config.color,
-        background: config.background,
-        fontSize: "11px",
-        fontWeight: 800,
-        letterSpacing: "0.04em",
-      }}
-    >
-      <Icon size={14} />
-
-      {decision || "UNKNOWN"}
-    </span>
-  );
-}
-
-function ActionStatusBadge({ status }) {
-  const configuration = {
-    reconciled: {
-      color: "#22c55e",
-      background: "rgba(34, 197, 94, 0.10)",
-      icon: CheckCircle2,
-    },
-    already_applied: {
-      color: "#22c55e",
-      background: "rgba(34, 197, 94, 0.10)",
-      icon: CheckCircle2,
-    },
-    failed: {
-      color: "#ef4444",
-      background: "rgba(239, 68, 68, 0.10)",
-      icon: XCircle,
-    },
-    sent_reconciliation_required: {
-      color: "#f59e0b",
-      background: "rgba(245, 158, 11, 0.10)",
-      icon: AlertTriangle,
-    },
-    executing: {
-      color: "#38bdf8",
-      background: "rgba(56, 189, 248, 0.10)",
-      icon: RefreshCw,
-    },
-    created: {
-      color: "#94a3b8",
-      background: "rgba(148, 163, 184, 0.10)",
-      icon: Clock3,
-    },
-    duplicate_blocked: {
-      color: "#a78bfa",
-      background: "rgba(167, 139, 250, 0.10)",
-      icon: ShieldCheck,
-    },
-  };
-
-  const config =
-    configuration[status] ||
-    configuration.created;
-
-  const Icon = config.icon;
-
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "6px 9px",
-        borderRadius: "999px",
-        color: config.color,
-        background: config.background,
-        fontSize: "10px",
-        fontWeight: 800,
-      }}
-    >
-      <Icon size={13} />
-
-      {String(status || "unknown").replaceAll(
-        "_",
-        " ",
-      )}
-    </span>
-  );
-}
-
-function ManagementPanel({
-  position,
-  management,
-  onEvaluate,
-  onExecute,
-  onLoadActions,
-}) {
-  const evaluation = management?.evaluation;
-  const actions = management?.actions || [];
-
-  const evaluating = management?.evaluating === true;
-  const executing = management?.executing === true;
-  const loadingActions =
-    management?.loadingActions === true;
-
-  const error = management?.error || "";
-
-  const canExecute =
-    evaluation &&
-    evaluation.decision &&
-    evaluation.decision !== "HOLD" &&
-    evaluation.ai_management_enabled === true;
-
-  return (
-    <div
-      style={{
-        borderTop:
-          "1px solid rgba(148, 163, 184, 0.10)",
-        paddingTop: "18px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "14px",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: "12px",
-          flexWrap: "wrap",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-        >
-          <BrainCircuit
-            size={17}
-            color="#38bdf8"
-          />
-
-          <strong
-            style={{
-              color: "#e2e8f0",
-              fontSize: "14px",
-            }}
-          >
-            AI Trade Management
-          </strong>
-        </div>
-
-        <span
-          style={{
-            color: "#64748b",
-            fontSize: "11px",
-          }}
-        >
-          Ticket #{position.ticket}
-        </span>
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          gap: "9px",
-          flexWrap: "wrap",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => onEvaluate(position.ticket)}
-          disabled={evaluating || executing}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "7px",
-            border:
-              "1px solid rgba(56, 189, 248, 0.25)",
-            background:
-              "rgba(56, 189, 248, 0.08)",
-            color: "#7dd3fc",
-            borderRadius: "10px",
-            padding: "9px 12px",
-            cursor:
-              evaluating || executing
-                ? "not-allowed"
-                : "pointer",
-            opacity:
-              evaluating || executing ? 0.6 : 1,
-          }}
-        >
-          <BrainCircuit size={15} />
-
-          {evaluating
-            ? "Evaluating..."
-            : "Evaluate AI management"}
-        </button>
-
-        <button
-          type="button"
-          onClick={() =>
-            onLoadActions(position.ticket)
-          }
-          disabled={
-            loadingActions ||
-            evaluating ||
-            executing
-          }
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "7px",
-            border:
-              "1px solid rgba(148, 163, 184, 0.18)",
-            background: "#0f172a",
-            color: "#cbd5e1",
-            borderRadius: "10px",
-            padding: "9px 12px",
-            cursor:
-              loadingActions ||
-              evaluating ||
-              executing
-                ? "not-allowed"
-                : "pointer",
-            opacity:
-              loadingActions ||
-              evaluating ||
-              executing
-                ? 0.6
-                : 1,
-          }}
-        >
-          <Clock3 size={15} />
-
-          {loadingActions
-            ? "Loading..."
-            : "Action history"}
-        </button>
-      </div>
-
-      {error && (
-        <div
-          style={{
-            padding: "10px 12px",
-            borderRadius: "10px",
-            background:
-              "rgba(239, 68, 68, 0.08)",
-            border:
-              "1px solid rgba(239, 68, 68, 0.20)",
-            color: "#fca5a5",
-            fontSize: "12px",
-            lineHeight: 1.5,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {evaluation && (
-        <div
-          style={{
-            background: "#020617",
-            border:
-              "1px solid rgba(148, 163, 184, 0.12)",
-            borderRadius: "14px",
-            padding: "14px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "10px",
-              flexWrap: "wrap",
-            }}
-          >
-            <DecisionBadge
-              decision={evaluation.decision}
-            />
-
-            <span
-              style={{
-                color:
-                  evaluation.ai_management_enabled
-                    ? "#22c55e"
-                    : "#ef4444",
-                fontSize: "11px",
-                fontWeight: 700,
-              }}
-            >
-              AI management{" "}
-              {evaluation.ai_management_enabled
-                ? "enabled"
-                : "disabled"}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(125px, 1fr))",
-              gap: "9px",
-            }}
-          >
-            <Metric
-              label="Current R"
-              value={
-                evaluation.current_r !== null &&
-                evaluation.current_r !== undefined
-                  ? `${formatNumber(
-                      evaluation.current_r,
-                      2,
-                    )}R`
-                  : "--"
-              }
-            />
-
-            <Metric
-              label="Proposed SL"
-              value={
-                evaluation.proposed_stop_loss !==
-                  null &&
-                evaluation.proposed_stop_loss !==
-                  undefined
-                  ? formatNumber(
-                      evaluation.proposed_stop_loss,
-                      5,
-                    )
-                  : "--"
-              }
-            />
-
-            <Metric
-              label="Partial close"
-              value={
-                evaluation.partial_close_percent !==
-                  null &&
-                evaluation.partial_close_percent !==
-                  undefined
-                  ? `${formatNumber(
-                      evaluation.partial_close_percent,
-                      2,
-                    )}%`
-                  : "--"
-              }
-            />
-
-            <Metric
-              label="Profile"
-              value={
-                evaluation.profile_name || "--"
-              }
-            />
-          </div>
-
-          <div
-            style={{
-              color: "#94a3b8",
-              fontSize: "12px",
-              lineHeight: 1.55,
-            }}
-          >
-            {evaluation.message}
-          </div>
-
-          {evaluation.warnings?.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "5px",
-                color: "#fbbf24",
-                fontSize: "11px",
-              }}
-            >
-              {evaluation.warnings.map(
-                (warning, index) => (
-                  <span key={index}>
-                    • {warning}
-                  </span>
-                ),
-              )}
-            </div>
-          )}
-
-          {evaluation.errors?.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "5px",
-                color: "#fca5a5",
-                fontSize: "11px",
-              }}
-            >
-              {evaluation.errors.map(
-                (item, index) => (
-                  <span key={index}>
-                    • {item}
-                  </span>
-                ),
-              )}
-            </div>
-          )}
-
-          {canExecute && (
-            <button
-              type="button"
-              onClick={() =>
-                onExecute(
-                  position.ticket,
-                  evaluation,
-                )
-              }
-              disabled={executing}
-              style={{
-                width: "100%",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                border:
-                  evaluation.decision ===
-                  "CLOSE_POSITION"
-                    ? "1px solid rgba(239, 68, 68, 0.35)"
-                    : "1px solid rgba(34, 197, 94, 0.30)",
-                background:
-                  evaluation.decision ===
-                  "CLOSE_POSITION"
-                    ? "rgba(239, 68, 68, 0.10)"
-                    : "rgba(34, 197, 94, 0.10)",
-                color:
-                  evaluation.decision ===
-                  "CLOSE_POSITION"
-                    ? "#fca5a5"
-                    : "#86efac",
-                borderRadius: "10px",
-                padding: "11px 13px",
-                cursor: executing
-                  ? "not-allowed"
-                  : "pointer",
-                opacity: executing ? 0.6 : 1,
-                fontWeight: 800,
-              }}
-            >
-              <ShieldCheck size={16} />
-
-              {executing
-                ? "Executing through protected pipeline..."
-                : `Execute ${evaluation.decision}`}
-            </button>
-          )}
-
-          {evaluation.decision ===
-            "HOLD" && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "7px",
-                color: "#64748b",
-                fontSize: "11px",
-              }}
-            >
-              <ShieldCheck size={14} />
-
-              No broker action is currently
-              recommended.
-            </div>
-          )}
-        </div>
-      )}
-
-      {actions.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px",
-          }}
-        >
-          <div
-            style={{
-              color: "#64748b",
-              fontSize: "10px",
-              fontWeight: 800,
-              letterSpacing: "0.10em",
-              textTransform: "uppercase",
-            }}
-          >
-            Recent management actions
-          </div>
-
-          {actions.slice(0, 5).map((action) => (
-            <div
-              key={action.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns:
-                  "minmax(100px, auto) minmax(0, 1fr) auto",
-                alignItems: "center",
-                gap: "10px",
-                padding: "10px",
-                borderRadius: "10px",
-                background: "#0f172a",
-                border:
-                  "1px solid rgba(148, 163, 184, 0.08)",
-              }}
-            >
-              <DecisionBadge
-                decision={action.decision}
-              />
-
-              <div
-                style={{
-                  minWidth: 0,
-                }}
-              >
-                <div
-                  style={{
-                    color: "#cbd5e1",
-                    fontSize: "11px",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {action.message ||
-                    "No action message recorded."}
-                </div>
-
-                <div
-                  style={{
-                    color: "#475569",
-                    fontSize: "10px",
-                    marginTop: "3px",
-                  }}
-                >
-                  {formatDate(
-                    action.created_at,
-                  )}
-                </div>
-              </div>
-
-              <ActionStatusBadge
-                status={action.status}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PositionCard({
-  position,
-  management,
-  onEvaluate,
-  onExecute,
-  onLoadActions,
-}) {
-  const profit = Number(position.profit || 0);
-  const isProfitable = profit > 0;
-  const isLosing = profit < 0;
+function PendingOrderCard({ order }) {
+  const isBuy = order.direction === "buy";
 
   return (
     <article
       style={{
         background: "#0f172a",
-        border:
-          "1px solid rgba(148, 163, 184, 0.14)",
-        borderRadius: "18px",
-        padding: "20px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "18px",
+        border: "1px solid rgba(245,158,11,.18)",
+        borderRadius: 18,
+        padding: 18,
       }}
     >
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: "12px",
+          gap: 12,
+          flexWrap: "wrap",
+          marginBottom: 16,
         }}
       >
         <div>
@@ -819,45 +176,196 @@ function PositionCard({
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "10px",
-              marginBottom: "6px",
+              gap: 9,
+              marginBottom: 6,
             }}
           >
             <strong
               style={{
                 color: "#f8fafc",
-                fontSize: "20px",
+                fontSize: 19,
               }}
             >
-              {position.symbol}
+              {order.broker_symbol || order.symbol}
             </strong>
 
-            <PositionTypeBadge
-              type={position.type}
-            />
+            <Badge tone={isBuy ? "buy" : "sell"}>
+              {isBuy ? "BUY" : "SELL"}
+            </Badge>
+
+            <Badge tone="pending">
+              {order.order_type}
+            </Badge>
           </div>
 
           <span
             style={{
               color: "#64748b",
-              fontSize: "12px",
+              fontSize: 11,
             }}
           >
-            Ticket #{position.ticket}
+            MT5 Order #{order.order_ticket}
           </span>
         </div>
 
-        <div
-          style={{
-            textAlign: "right",
-          }}
-        >
+        <Badge tone="pending">
+          {order.pending_order_status}
+        </Badge>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit,minmax(130px,1fr))",
+          gap: 10,
+        }}
+      >
+        <Metric
+          label="Entry"
+          value={number(order.entry_price)}
+        />
+
+        <Metric
+          label="Volume"
+          value={number(order.volume, 2)}
+        />
+
+        <Metric
+          label="Stop Loss"
+          value={number(order.stop_loss)}
+        />
+
+        <Metric
+          label="Take Profit"
+          value={number(order.take_profit)}
+        />
+
+        <Metric
+          label="Placed"
+          value={dateTime(order.placed_at)}
+        />
+
+        <Metric
+          label="Execution"
+          value={order.execution_status}
+        />
+      </div>
+
+      <div
+        style={{
+          marginTop: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          color: "#64748b",
+          fontSize: 11,
+        }}
+      >
+        <Clock3 size={14} />
+
+        Waiting for MetaTrader 5 activation
+      </div>
+    </article>
+  );
+}
+
+function PositionCard({
+  position,
+  tick,
+  management,
+  onEvaluate,
+  onExecute,
+  onActions,
+}) {
+  const livePrice =
+    position.type === "buy"
+      ? tick?.bid ?? position.current_price
+      : tick?.ask ?? position.current_price;
+
+  const entry = Number(position.entry_price || 0);
+  const current = Number(livePrice || 0);
+
+  const profit =
+    position.type === "buy"
+      ? (current - entry) * Number(position.volume || 0)
+      : (entry - current) * Number(position.volume || 0);
+
+  const displayedProfit =
+    Number.isFinite(profit)
+      ? profit
+      : Number(position.profit || 0);
+
+  const evaluation = management?.evaluation;
+  const actions = management?.actions || [];
+
+  return (
+    <article
+      style={{
+        background: "#0f172a",
+        border: "1px solid rgba(148,163,184,.14)",
+        borderRadius: 18,
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+            }}
+          >
+            <strong
+              style={{
+                color: "#f8fafc",
+                fontSize: 21,
+              }}
+            >
+              {position.symbol}
+            </strong>
+
+            <Badge
+              tone={
+                position.type === "buy"
+                  ? "buy"
+                  : "sell"
+              }
+            >
+              {position.type}
+            </Badge>
+
+            <Badge tone="live">LIVE</Badge>
+          </div>
+
+          <span
+            style={{
+              display: "block",
+              marginTop: 6,
+              color: "#64748b",
+              fontSize: 11,
+            }}
+          >
+            Position #{position.ticket}
+          </span>
+        </div>
+
+        <div style={{ textAlign: "right" }}>
           <span
             style={{
               display: "block",
               color: "#64748b",
-              fontSize: "11px",
-              marginBottom: "4px",
+              fontSize: 10,
+              textTransform: "uppercase",
             }}
           >
             Floating P/L
@@ -865,16 +373,101 @@ function PositionCard({
 
           <strong
             style={{
-              color: isProfitable
-                ? "#22c55e"
-                : isLosing
-                  ? "#ef4444"
-                  : "#94a3b8",
-              fontSize: "18px",
+              color:
+                displayedProfit > 0
+                  ? "#22c55e"
+                  : displayedProfit < 0
+                    ? "#ef4444"
+                    : "#94a3b8",
+              fontSize: 19,
             }}
           >
-            {formatMoney(profit)}
+            {money(displayedProfit)}
           </strong>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 18,
+          padding: 16,
+          borderRadius: 14,
+          background: "#020617",
+          border: "1px solid rgba(56,189,248,.12)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              color: "#64748b",
+              fontSize: 10,
+              textTransform: "uppercase",
+            }}
+          >
+            Live MT5 price
+          </span>
+
+          <span
+            style={{
+              color: "#38bdf8",
+              fontSize: 10,
+            }}
+          >
+            {tick?.timestamp
+              ? new Date(
+                  tick.timestamp,
+                ).toLocaleTimeString()
+              : "Waiting"}
+          </span>
+        </div>
+
+        <strong
+          style={{
+            display: "block",
+            marginTop: 6,
+            color: "#f8fafc",
+            fontSize: 30,
+            letterSpacing: ".02em",
+          }}
+        >
+          {number(livePrice)}
+        </strong>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 20,
+            marginTop: 7,
+            color: "#64748b",
+            fontSize: 11,
+          }}
+        >
+          <span>
+            Bid{" "}
+            <strong style={{ color: "#cbd5e1" }}>
+              {number(tick?.bid)}
+            </strong>
+          </span>
+
+          <span>
+            Ask{" "}
+            <strong style={{ color: "#cbd5e1" }}>
+              {number(tick?.ask)}
+            </strong>
+          </span>
+
+          <span>
+            Spread{" "}
+            <strong style={{ color: "#cbd5e1" }}>
+              {number(tick?.spread)}
+            </strong>
+          </span>
         </div>
       </div>
 
@@ -882,39 +475,26 @@ function PositionCard({
         style={{
           display: "grid",
           gridTemplateColumns:
-            "repeat(auto-fit, minmax(120px, 1fr))",
-          gap: "12px",
+            "repeat(auto-fit,minmax(130px,1fr))",
+          gap: 10,
+          marginTop: 14,
         }}
       >
         <Metric
           label="Volume"
-          value={formatNumber(position.volume, 2)}
+          value={number(position.volume, 2)}
         />
 
         <Metric
           label="Entry"
-          value={formatNumber(
-            position.entry_price,
-            5,
-          )}
-        />
-
-        <Metric
-          label="Current"
-          value={formatNumber(
-            position.current_price,
-            5,
-          )}
+          value={number(position.entry_price)}
         />
 
         <Metric
           label="Stop Loss"
           value={
             Number(position.stop_loss || 0) > 0
-              ? formatNumber(
-                  position.stop_loss,
-                  5,
-                )
+              ? number(position.stop_loss)
               : "Not set"
           }
         />
@@ -923,59 +503,275 @@ function PositionCard({
           label="Take Profit"
           value={
             Number(position.take_profit || 0) > 0
-              ? formatNumber(
-                  position.take_profit,
-                  5,
-                )
+              ? number(position.take_profit)
               : "Not set"
           }
         />
 
         <Metric
           label="Swap"
-          value={formatMoney(position.swap)}
+          value={money(position.swap)}
+        />
+
+        <Metric
+          label="Magic"
+          value={position.magic}
         />
       </div>
 
       <div
         style={{
+          marginTop: 16,
+          paddingTop: 14,
           borderTop:
-            "1px solid rgba(148, 163, 184, 0.10)",
-          paddingTop: "14px",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          color: "#64748b",
-          fontSize: "12px",
+            "1px solid rgba(148,163,184,.10)",
         }}
       >
-        <ShieldCheck size={15} />
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <BrainCircuit
+              size={17}
+              color="#38bdf8"
+            />
 
-        <span>
-          Managed by AI Trader · Magic {position.magic}
-        </span>
+            <strong
+              style={{
+                color: "#e2e8f0",
+                fontSize: 14,
+              }}
+            >
+              AI Trade Management
+            </strong>
+          </div>
+
+          <span
+            style={{
+              color: "#64748b",
+              fontSize: 10,
+            }}
+          >
+            Magic {position.magic}
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 9,
+            flexWrap: "wrap",
+            marginTop: 12,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              onEvaluate(position.ticket)
+            }
+            disabled={management?.evaluating}
+            style={buttonStyle("#38bdf8")}
+          >
+            <BrainCircuit size={15} />
+            {management?.evaluating
+              ? "Evaluating..."
+              : "Evaluate"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              onActions(position.ticket)
+            }
+            disabled={management?.loadingActions}
+            style={buttonStyle("#94a3b8")}
+          >
+            <Clock3 size={15} />
+            {management?.loadingActions
+              ? "Loading..."
+              : "Action history"}
+          </button>
+        </div>
+
+        {evaluation && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 14,
+              borderRadius: 12,
+              background: "#020617",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <strong style={{ color: "#f8fafc" }}>
+                {evaluation.decision}
+              </strong>
+
+              <span
+                style={{
+                  color:
+                    evaluation.ai_management_enabled
+                      ? "#22c55e"
+                      : "#ef4444",
+                  fontSize: 10,
+                }}
+              >
+                AI{" "}
+                {evaluation.ai_management_enabled
+                  ? "enabled"
+                  : "disabled"}
+              </span>
+            </div>
+
+            <p
+              style={{
+                color: "#94a3b8",
+                fontSize: 11,
+                lineHeight: 1.5,
+              }}
+            >
+              {evaluation.message}
+            </p>
+
+            {evaluation.decision !== "HOLD" &&
+              evaluation.ai_management_enabled && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onExecute(
+                      position.ticket,
+                      evaluation,
+                    )
+                  }
+                  disabled={management?.executing}
+                  style={buttonStyle("#22c55e")}
+                >
+                  <ShieldCheck size={15} />
+                  {management?.executing
+                    ? "Executing..."
+                    : `Execute ${evaluation.decision}`}
+                </button>
+              )}
+          </div>
+        )}
+
+        {actions.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <span
+              style={{
+                color: "#64748b",
+                fontSize: 10,
+                textTransform: "uppercase",
+              }}
+            >
+              Recent actions
+            </span>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 7,
+                marginTop: 7,
+              }}
+            >
+              {actions.slice(0, 5).map((action) => (
+                <div
+                  key={action.id}
+                  style={{
+                    padding: 9,
+                    borderRadius: 9,
+                    background: "#0f172a",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      color: "#cbd5e1",
+                      fontSize: 10,
+                    }}
+                  >
+                    {action.decision}
+                    {" · "}
+                    {dateTime(action.created_at)}
+                  </span>
+
+                  <span
+                    style={{
+                      color:
+                        action.status ===
+                          "reconciled" ||
+                        action.status ===
+                          "already_applied"
+                          ? "#22c55e"
+                          : action.status ===
+                              "failed"
+                            ? "#ef4444"
+                            : "#f59e0b",
+                      fontSize: 10,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {action.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-
-      <ManagementPanel
-        position={position}
-        management={management}
-        onEvaluate={onEvaluate}
-        onExecute={onExecute}
-        onLoadActions={onLoadActions}
-      />
     </article>
   );
 }
 
+function buttonStyle(color) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    border: `1px solid ${color}55`,
+    background: `${color}12`,
+    color,
+    borderRadius: 10,
+    padding: "9px 12px",
+    cursor: "pointer",
+    fontWeight: 700,
+    fontSize: 11,
+  };
+}
+
 export default function PositionsPage() {
   const [positions, setPositions] = useState([]);
+  const [pendingOrders, setPendingOrders] =
+    useState([]);
+  const [ticks, setTicks] = useState({});
   const [summary, setSummary] = useState({
     open_trades: 0,
     total_volume: 0,
     floating_profit: 0,
   });
 
-  const [managementByTicket, setManagementByTicket] =
+  const [management, setManagement] =
     useState({});
 
   const [loading, setLoading] = useState(true);
@@ -984,7 +780,7 @@ export default function PositionsPage() {
 
   const updateManagement = useCallback(
     (ticket, patch) => {
-      setManagementByTicket((current) => ({
+      setManagement((current) => ({
         ...current,
         [ticket]: {
           ...current[ticket],
@@ -993,35 +789,6 @@ export default function PositionsPage() {
       }));
     },
     [],
-  );
-
-  const loadActions = useCallback(
-    async (positionTicket) => {
-      updateManagement(positionTicket, {
-        loadingActions: true,
-        error: "",
-      });
-
-      try {
-        const response = await api.get(
-          `/api/ai-trade-management/positions/${positionTicket}/actions`,
-        );
-
-        updateManagement(positionTicket, {
-          actions:
-            response?.data?.actions || [],
-          loadingActions: false,
-        });
-      } catch (requestError) {
-        updateManagement(positionTicket, {
-          loadingActions: false,
-          error:
-            requestError?.response?.data?.detail ||
-            "Unable to load AI management action history.",
-        });
-      }
-    },
-    [updateManagement],
   );
 
   const loadPositions = useCallback(
@@ -1033,74 +800,38 @@ export default function PositionsPage() {
           setLoading(true);
         }
 
-        setError("");
-
         const [
           positionsResponse,
           summaryResponse,
+          pendingResponse,
         ] = await Promise.all([
           api.get("/api/mt5/positions"),
           api.get("/api/mt5/positions/summary"),
+          api.get("/api/pending-orders"),
         ]);
 
-        const livePositions =
-          positionsResponse?.data?.positions || [];
-
-        setPositions(livePositions);
+        setPositions(
+          positionsResponse?.data?.positions || [],
+        );
 
         setSummary({
           open_trades:
             summaryResponse?.data?.open_trades ?? 0,
-
           total_volume:
             summaryResponse?.data?.total_volume ?? 0,
-
           floating_profit:
             summaryResponse?.data?.floating_profit ?? 0,
         });
 
-        const actionResults =
-          await Promise.all(
-            livePositions.map(async (position) => {
-              try {
-                const response =
-                  await api.get(
-                    `/api/ai-trade-management/positions/${position.ticket}/actions`,
-                  );
+        setPendingOrders(
+          pendingResponse?.data?.pending_orders || [],
+        );
 
-                return {
-                  ticket: position.ticket,
-                  actions:
-                    response?.data?.actions || [],
-                };
-              } catch {
-                return {
-                  ticket: position.ticket,
-                  actions: [],
-                };
-              }
-            }),
-          );
-
-        setManagementByTicket((current) => {
-          const next = {
-            ...current,
-          };
-
-          for (const item of actionResults) {
-            next[item.ticket] = {
-              ...next[item.ticket],
-              actions: item.actions,
-              loadingActions: false,
-            };
-          }
-
-          return next;
-        });
+        setError("");
       } catch (requestError) {
         setError(
           requestError?.response?.data?.detail ||
-            "Unable to load live MT5 positions.",
+            "Unable to load live MT5 trading state.",
         );
       } finally {
         setLoading(false);
@@ -1110,109 +841,174 @@ export default function PositionsPage() {
     [],
   );
 
-  const evaluatePosition = useCallback(
-    async (positionTicket) => {
-      updateManagement(positionTicket, {
+  const loadTick = useCallback(
+    async (symbol) => {
+      try {
+        const response = await api.get(
+          `/api/mt5/market-data/tick/${encodeURIComponent(
+            symbol,
+          )}`,
+        );
+
+        setTicks((current) => ({
+          ...current,
+          [symbol]: response.data,
+        }));
+      } catch {
+        setTicks((current) => ({
+          ...current,
+          [symbol]: current[symbol] || null,
+        }));
+      }
+    },
+    [],
+  );
+
+  const loadActions = useCallback(
+    async (ticket) => {
+      updateManagement(ticket, {
+        loadingActions: true,
+        error: "",
+      });
+
+      try {
+        const response = await api.get(
+          `/api/ai-trade-management/positions/${ticket}/actions`,
+        );
+
+        updateManagement(ticket, {
+          actions: response?.data?.actions || [],
+          loadingActions: false,
+        });
+      } catch (requestError) {
+        updateManagement(ticket, {
+          loadingActions: false,
+          error:
+            requestError?.response?.data?.detail ||
+            "Unable to load action history.",
+        });
+      }
+    },
+    [updateManagement],
+  );
+
+  const evaluate = useCallback(
+    async (ticket) => {
+      updateManagement(ticket, {
         evaluating: true,
         error: "",
       });
 
       try {
         const response = await api.get(
-          `/api/ai-trade-management/positions/${positionTicket}/evaluate`,
+          `/api/ai-trade-management/positions/${ticket}/evaluate`,
         );
 
-        updateManagement(positionTicket, {
+        updateManagement(ticket, {
           evaluation: response.data,
           evaluating: false,
         });
-
-        await loadActions(positionTicket);
       } catch (requestError) {
-        updateManagement(positionTicket, {
+        updateManagement(ticket, {
           evaluating: false,
           error:
             requestError?.response?.data?.detail ||
-            "Unable to evaluate AI trade management.",
+            "Unable to evaluate position.",
         });
       }
     },
-    [loadActions, updateManagement],
+    [updateManagement],
   );
 
-  const executePosition = useCallback(
-    async (positionTicket, evaluation) => {
-      const decision = evaluation?.decision;
+  const execute = useCallback(
+    async (ticket, evaluation) => {
+      if (!evaluation?.decision) {
+        return;
+      }
 
       if (
-        !decision ||
-        decision === "HOLD"
+        !window.confirm(
+          `Execute ${evaluation.decision} for position #${ticket}?`,
+        )
       ) {
         return;
       }
 
-      const confirmationMessage =
-        decision === "CLOSE_POSITION"
-          ? `AI management recommends CLOSE_POSITION for ticket #${positionTicket}. This can close the live MT5 position. Continue?`
-          : `AI management recommends ${decision} for ticket #${positionTicket}. The backend will re-evaluate the live position immediately before execution. Continue?`;
-
-      const confirmed = window.confirm(
-        confirmationMessage,
-      );
-
-      if (!confirmed) {
-        return;
-      }
-
-      updateManagement(positionTicket, {
+      updateManagement(ticket, {
         executing: true,
         error: "",
       });
 
       try {
         const response = await api.post(
-          `/api/ai-trade-management/positions/${positionTicket}/execute`,
+          `/api/ai-trade-management/positions/${ticket}/execute`,
         );
 
-        updateManagement(positionTicket, {
+        updateManagement(ticket, {
           executing: false,
           lastExecution: response.data,
-          evaluation:
-            response?.data?.evaluation ||
-            evaluation,
         });
 
         await loadPositions(true);
-        await loadActions(positionTicket);
+        await loadActions(ticket);
       } catch (requestError) {
-        updateManagement(positionTicket, {
+        updateManagement(ticket, {
           executing: false,
           error:
             requestError?.response?.data?.detail ||
-            "AI management execution failed.",
+            "Management execution failed.",
         });
-
-        await loadActions(positionTicket);
       }
     },
-    [
-      loadActions,
-      loadPositions,
-      updateManagement,
-    ],
+    [loadActions, loadPositions, updateManagement],
   );
 
   useEffect(() => {
     loadPositions();
 
-    const interval = window.setInterval(() => {
-      loadPositions();
-    }, 5000);
+    const stateInterval = window.setInterval(
+      () => loadPositions(),
+      2000,
+    );
 
     return () => {
-      window.clearInterval(interval);
+      window.clearInterval(stateInterval);
     };
   }, [loadPositions]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshTicks = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const symbols = [
+        ...new Set(
+          positions.map(
+            (position) => position.symbol,
+          ),
+        ),
+      ];
+
+      await Promise.all(
+        symbols.map((symbol) => loadTick(symbol)),
+      );
+    };
+
+    refreshTicks();
+
+    const tickInterval = window.setInterval(
+      refreshTicks,
+      250,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(tickInterval);
+    };
+  }, [positions, loadTick]);
 
   const floatingProfit = Number(
     summary.floating_profit || 0,
@@ -1225,49 +1021,46 @@ export default function PositionsPage() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "flex-start",
-          gap: "18px",
+          gap: 18,
           flexWrap: "wrap",
-          marginBottom: "26px",
+          marginBottom: 26,
         }}
       >
         <div>
           <div
             style={{
               color: "#22c55e",
-              fontSize: "11px",
+              fontSize: 11,
               fontWeight: 800,
-              letterSpacing: "0.12em",
+              letterSpacing: ".12em",
               textTransform: "uppercase",
-              marginBottom: "8px",
+              marginBottom: 8,
             }}
           >
-            Live MT5 positions
+            Live MT5 trading
           </div>
 
           <h1
             style={{
               margin: 0,
               color: "#f8fafc",
-              fontSize:
-                "clamp(26px, 5vw, 38px)",
-              lineHeight: 1.1,
+              fontSize: "clamp(26px,5vw,38px)",
             }}
           >
-            Open Positions
+            Positions
           </h1>
 
           <p
             style={{
               margin: "10px 0 0",
               color: "#64748b",
-              maxWidth: "680px",
+              maxWidth: 720,
               lineHeight: 1.6,
             }}
           >
-            Monitor active AI-managed MetaTrader 5
-            positions, evaluate the live management
-            state, review previous actions and explicitly
-            authorize controlled management execution.
+            Pending orders and live platform-owned
+            MetaTrader 5 positions in one trading
+            workspace.
           </p>
         </div>
 
@@ -1275,48 +1068,24 @@ export default function PositionsPage() {
           type="button"
           onClick={() => loadPositions(true)}
           disabled={refreshing}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "8px",
-            border:
-              "1px solid rgba(148, 163, 184, 0.18)",
-            background: "#0f172a",
-            color: "#e2e8f0",
-            borderRadius: "12px",
-            padding: "11px 15px",
-            cursor: refreshing
-              ? "not-allowed"
-              : "pointer",
-            opacity: refreshing ? 0.6 : 1,
-          }}
+          style={buttonStyle("#cbd5e1")}
         >
-          <RefreshCw
-            size={16}
-            style={{
-              animation: refreshing
-                ? "spin 1s linear infinite"
-                : "none",
-            }}
-          />
-
+          <RefreshCw size={16} />
           {refreshing
             ? "Refreshing..."
-            : "Refresh positions"}
+            : "Refresh trading state"}
         </button>
       </div>
 
       {error && (
         <div
           style={{
-            marginBottom: "20px",
-            padding: "14px 16px",
-            borderRadius: "12px",
-            background:
-              "rgba(239, 68, 68, 0.10)",
+            marginBottom: 18,
+            padding: 14,
+            borderRadius: 12,
+            background: "rgba(239,68,68,.10)",
             border:
-              "1px solid rgba(239, 68, 68, 0.25)",
+              "1px solid rgba(239,68,68,.25)",
             color: "#fca5a5",
           }}
         >
@@ -1328,43 +1097,29 @@ export default function PositionsPage() {
         style={{
           display: "grid",
           gridTemplateColumns:
-            "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "14px",
-          marginBottom: "24px",
+            "repeat(auto-fit,minmax(180px,1fr))",
+          gap: 14,
+          marginBottom: 24,
         }}
       >
-        <SummaryCard
-          icon={BriefcaseBusiness}
+        <Metric
           label="Open positions"
           value={summary.open_trades}
-          accent="#38bdf8"
         />
 
-        <SummaryCard
-          icon={Activity}
+        <Metric
+          label="Pending orders"
+          value={pendingOrders.length}
+        />
+
+        <Metric
           label="Total volume"
-          value={formatNumber(
-            summary.total_volume,
-            2,
-          )}
-          accent="#a78bfa"
+          value={number(summary.total_volume, 2)}
         />
 
-        <SummaryCard
-          icon={
-            floatingProfit >= 0
-              ? TrendingUp
-              : TrendingDown
-          }
+        <Metric
           label="Floating P/L"
-          value={formatMoney(floatingProfit)}
-          accent={
-            floatingProfit > 0
-              ? "#22c55e"
-              : floatingProfit < 0
-                ? "#ef4444"
-                : "#94a3b8"
-          }
+          value={money(floatingProfit)}
         />
       </div>
 
@@ -1372,9 +1127,10 @@ export default function PositionsPage() {
         style={{
           background: "#020617",
           border:
-            "1px solid rgba(148, 163, 184, 0.12)",
-          borderRadius: "20px",
-          padding: "20px",
+            "1px solid rgba(245,158,11,.18)",
+          borderRadius: 20,
+          padding: 20,
+          marginBottom: 20,
         }}
       >
         <div
@@ -1382,53 +1138,205 @@ export default function PositionsPage() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            gap: "12px",
-            marginBottom: "18px",
+            marginBottom: 18,
           }}
         >
           <div>
+            <span
+              style={{
+                color: "#f59e0b",
+                fontSize: 10,
+                textTransform: "uppercase",
+                fontWeight: 800,
+              }}
+            >
+              Execution queue
+            </span>
+
             <h2
               style={{
-                margin: 0,
-                color: "#f8fafc",
-                fontSize: "18px",
-              }}
-            >
-              Active positions
-            </h2>
-
-            <p
-              style={{
                 margin: "5px 0 0",
-                color: "#64748b",
-                fontSize: "12px",
+                color: "#f8fafc",
+                fontSize: 18,
               }}
             >
-              Automatically refreshed from MetaTrader 5
-            </p>
+              Pending Orders
+            </h2>
           </div>
 
-          <span
+          <Badge tone="pending">
+            {pendingOrders.length} ACTIVE
+          </Badge>
+        </div>
+
+        {pendingOrders.length === 0 ? (
+          <div
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "7px",
-              color: "#22c55e",
-              fontSize: "11px",
-              fontWeight: 700,
+              padding: 20,
+              color: "#64748b",
+              fontSize: 12,
+              textAlign: "center",
             }}
           >
-            <span className="live-indicator" />
-            LIVE
-          </span>
+            No active pending orders.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit,minmax(300px,1fr))",
+              gap: 14,
+            }}
+          >
+            {pendingOrders.map((order) => (
+              <div
+                key={order.intent_id}
+                style={{
+                  background: "#0f172a",
+                  border:
+                    "1px solid rgba(245,158,11,.14)",
+                  borderRadius: 14,
+                  padding: 15,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <strong
+                    style={{
+                      color: "#f8fafc",
+                      fontSize: 16,
+                    }}
+                  >
+                    {order.broker_symbol ||
+                      order.symbol}
+                  </strong>
+
+                  <Badge tone="pending">
+                    {order.order_type}
+                  </Badge>
+                </div>
+
+                <div
+                  style={{
+                    color: "#64748b",
+                    fontSize: 10,
+                    marginTop: 5,
+                  }}
+                >
+                  Order #{order.order_ticket}
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(2,minmax(0,1fr))",
+                    gap: 8,
+                    marginTop: 13,
+                  }}
+                >
+                  <Metric
+                    label="Entry"
+                    value={number(
+                      order.entry_price,
+                    )}
+                  />
+
+                  <Metric
+                    label="Volume"
+                    value={number(
+                      order.volume,
+                      2,
+                    )}
+                  />
+
+                  <Metric
+                    label="SL"
+                    value={number(
+                      order.stop_loss,
+                    )}
+                  />
+
+                  <Metric
+                    label="TP"
+                    value={number(
+                      order.take_profit,
+                    )}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    color: "#fbbf24",
+                    fontSize: 10,
+                  }}
+                >
+                  Waiting for MT5 activation ·{" "}
+                  {dateTime(order.placed_at)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section
+        style={{
+          background: "#020617",
+          border:
+            "1px solid rgba(148,163,184,.12)",
+          borderRadius: 20,
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 18,
+          }}
+        >
+          <div>
+            <span
+              style={{
+                color: "#38bdf8",
+                fontSize: 10,
+                textTransform: "uppercase",
+                fontWeight: 800,
+              }}
+            >
+              Broker positions
+            </span>
+
+            <h2
+              style={{
+                margin: "5px 0 0",
+                color: "#f8fafc",
+                fontSize: 18,
+              }}
+            >
+              Open Positions
+            </h2>
+          </div>
+
+          <Badge tone="live">
+            LIVE MT5
+          </Badge>
         </div>
 
         {loading ? (
           <div
             style={{
-              minHeight: "180px",
-              display: "grid",
-              placeItems: "center",
+              padding: 30,
+              textAlign: "center",
               color: "#64748b",
             }}
           >
@@ -1437,78 +1345,33 @@ export default function PositionsPage() {
         ) : positions.length === 0 ? (
           <div
             style={{
-              minHeight: "240px",
-              display: "grid",
-              placeItems: "center",
+              padding: 30,
               textAlign: "center",
-              padding: "30px",
+              color: "#64748b",
             }}
           >
-            <div>
-              <div
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "16px",
-                  display: "grid",
-                  placeItems: "center",
-                  margin: "0 auto 14px",
-                  background:
-                    "rgba(56, 189, 248, 0.08)",
-                  color: "#38bdf8",
-                }}
-              >
-                <BriefcaseBusiness size={25} />
-              </div>
-
-              <h3
-                style={{
-                  margin: "0 0 8px",
-                  color: "#e2e8f0",
-                  fontSize: "17px",
-                }}
-              >
-                No open positions
-              </h3>
-
-              <p
-                style={{
-                  margin: 0,
-                  color: "#64748b",
-                  fontSize: "13px",
-                  lineHeight: 1.6,
-                  maxWidth: "440px",
-                }}
-              >
-                There are currently no active
-                AI-managed positions on MetaTrader 5.
-                New positions will appear here
-                automatically after a confirmed
-                execution.
-              </p>
-            </div>
+            No open platform-owned positions.
           </div>
         ) : (
           <div
             style={{
               display: "grid",
               gridTemplateColumns:
-                "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: "16px",
+                "repeat(auto-fit,minmax(320px,1fr))",
+              gap: 16,
             }}
           >
             {positions.map((position) => (
               <PositionCard
                 key={position.ticket}
                 position={position}
+                tick={ticks[position.symbol]}
                 management={
-                  managementByTicket[
-                    position.ticket
-                  ]
+                  management[position.ticket]
                 }
-                onEvaluate={evaluatePosition}
-                onExecute={executePosition}
-                onLoadActions={loadActions}
+                onEvaluate={evaluate}
+                onExecute={execute}
+                onActions={loadActions}
               />
             ))}
           </div>
@@ -1517,44 +1380,26 @@ export default function PositionsPage() {
 
       <div
         style={{
-          marginTop: "18px",
+          marginTop: 18,
           display: "flex",
-          alignItems: "flex-start",
-          gap: "8px",
+          gap: 8,
           color: "#64748b",
-          fontSize: "11px",
+          fontSize: 11,
           lineHeight: 1.5,
         }}
       >
         <ShieldCheck
           size={15}
-          style={{
-            flexShrink: 0,
-            marginTop: "1px",
-          }}
+          style={{ flexShrink: 0 }}
         />
 
         <span>
-          AI management execution remains behind the
-          protected backend orchestration boundary. The
-          frontend never sends MT5 orders directly. Every
-          execution request is re-evaluated against live
-          broker state before the backend can send the
-          approved management action.
+          Live prices are read directly from the
+          existing MT5 tick endpoint every 250ms.
+          Position state remains broker-authoritative
+          and is reconciled independently.
         </span>
       </div>
-
-      <style>{`
-        @keyframes spin {
-          from {
-            transform: rotate(0deg);
-          }
-
-          to {
-            transform: rotate(360deg);
-          }
-        }
-      `}</style>
     </section>
   );
 }

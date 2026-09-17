@@ -28,6 +28,7 @@ import MarketsPage from "./MarketsPage";
 import AIAnalysisPage from "./AIAnalysisPage";
 import TradingPage from "./TradingPage";
 import LoginPage from "./LoginPage.jsx";
+import ManualTradePage from "./ManualTradePage.jsx";
 import PositionsPage from "./PositionsPage.jsx";
 import "./App.css";
 
@@ -51,6 +52,11 @@ const navigation = [
     to: "/trading",
     label: "Trading",
     icon: TrendingUp,
+  },
+  {
+  to: "/manual-trade",
+  label: "Manual Trade",
+  icon: TrendingUp,
   },
   {
     to: "/positions",
@@ -372,6 +378,11 @@ function TradingApplication() {
               path="/trading"
               element={<TradingPage />}
             />
+
+            <Route
+  path="/manual-trade"
+  element={<ManualTradePage />}
+/>
 
             <Route
               path="/positions"
