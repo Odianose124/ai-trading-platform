@@ -510,6 +510,46 @@ class MT5WorkerManager:
                     f"{mt5_account_id}: {exc}"
                 ) from exc
 
+    def execute_order(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Execute an order through the user's isolated MT5 worker.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.execute_order(request)
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to execute order for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
     def shutdown_all(self) -> None:
         with self._lock:
             account_ids = list(self._workers.keys())

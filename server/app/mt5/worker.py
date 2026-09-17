@@ -674,3 +674,174 @@ class MT5AccountWorker:
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.stop()
+    # ------------------------------------------------------------------
+    # ORDER EXECUTION
+    # ------------------------------------------------------------------
+
+    def execute_order(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Execute one already-authorized MT5 trade request.
+
+        This method runs only inside the account-scoped worker process.
+        The parent FastAPI process never calls mt5.order_send() directly.
+
+        The request must already contain the final broker-approved MT5
+        order parameters. This method is responsible only for the final
+        broker interaction and result serialization.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        if not isinstance(request, dict):
+            raise MT5WorkerError(
+                "MT5 order request must be a dictionary."
+            )
+
+        broker_symbol = str(
+            request.get("symbol", "")
+        ).strip()
+
+        if not broker_symbol:
+            raise MT5WorkerError(
+                "MT5 order symbol is required."
+            )
+
+        try:
+            volume = float(
+                request.get("volume")
+            )
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "MT5 order volume must be numeric."
+            ) from exc
+
+        if volume <= 0:
+            raise MT5WorkerError(
+                "MT5 order volume must be greater than zero."
+            )
+
+        try:
+            order_type = int(
+                request.get("type")
+            )
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "MT5 order type must be an integer."
+            ) from exc
+
+        trade_action = request.get(
+            "action",
+            mt5.TRADE_ACTION_DEAL,
+        )
+
+        try:
+            trade_action = int(trade_action)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "MT5 trade action must be an integer."
+            ) from exc
+
+        symbol_info = mt5.symbol_info(
+            broker_symbol
+        )
+
+        if symbol_info is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 symbol information for "
+                f"{broker_symbol}: {error}"
+            )
+
+        if not symbol_info.visible:
+            selected = mt5.symbol_select(
+                broker_symbol,
+                True,
+            )
+
+            if not selected:
+                error = mt5.last_error()
+
+                raise MT5WorkerError(
+                    "Unable to select MT5 symbol "
+                    f"{broker_symbol}: {error}"
+                )
+
+        final_request = dict(request)
+
+        final_request["symbol"] = broker_symbol
+        final_request["volume"] = volume
+        final_request["type"] = order_type
+        final_request["action"] = trade_action
+
+        result = mt5.order_send(
+            final_request
+        )
+
+        if result is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "MT5 order_send returned no result: "
+                f"MT5 last_error={error}"
+            )
+
+        return {
+            "retcode": getattr(
+                result,
+                "retcode",
+                None,
+            ),
+            "comment": getattr(
+                result,
+                "comment",
+                None,
+            ),
+            "request_id": getattr(
+                result,
+                "request_id",
+                None,
+            ),
+            "order": getattr(
+                result,
+                "order",
+                None,
+            ),
+            "deal": getattr(
+                result,
+                "deal",
+                None,
+            ),
+            "volume": getattr(
+                result,
+                "volume",
+                None,
+            ),
+            "price": getattr(
+                result,
+                "price",
+                None,
+            ),
+            "bid": getattr(
+                result,
+                "bid",
+                None,
+            ),
+            "ask": getattr(
+                result,
+                "ask",
+                None,
+            ),
+            "retcode_external": getattr(
+                result,
+                "retcode_external",
+                None,
+            ),
+            "last_error": mt5.last_error(),
+        }

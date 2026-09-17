@@ -271,6 +271,38 @@ def _worker_process_entry(
                 )
                 continue
 
+            if action == "execute_order":
+                request = command.get("request")
+
+                if not isinstance(request, dict):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The order request must be an object."
+                            ),
+                        }
+                    )
+                    continue
+
+                try:
+                    result = worker.execute_order(request)
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "order_result",
+                        "result": result,
+                    }
+                )
+                continue
             if action == "stop":
                 worker.stop()
 
@@ -832,6 +864,56 @@ class MT5WorkerProcess:
 
             return result
 
+    def execute_order(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Execute an order through the dedicated account worker.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            if not isinstance(request, dict):
+                raise MT5WorkerProcessError(
+                    "The order request must be an object."
+                )
+
+            self._send_command(
+                {
+                    "action": "execute_order",
+                    "request": request,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker order execution failed.",
+                    )
+                )
+
+            if response.get("type") != "order_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "order execution response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid order result."
+                )
+
+            return result
     def stop(self) -> None:
         with self._lock:
             process = self._process
