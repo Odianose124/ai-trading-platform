@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -8,11 +8,9 @@ from sqlalchemy.orm import Session
 from app.models.trade_intent import TradeIntent
 from app.models.user_settings import UserSettings
 from app.models.mt5_trading_account import MT5TradingAccount
-from app.execution.position_manager import PositionManager
-from app.mt5.connection import (
-    MT5AccountMismatchError,
-    MT5ConnectionError,
-    mt5_connection,
+from app.mt5.worker_manager import (
+    MT5WorkerManagerError,
+    mt5_worker_manager,
 )
 from app.services.broker_validation_service import (
     broker_validation_service,
@@ -432,12 +430,9 @@ class TradeConfirmationService:
         user_id: int,
     ) -> MT5TradingAccount:
         """
-        Resolve and verify the MT5 account owned by the authenticated user.
-
-        This check is intentionally performed inside the confirmation
-        service so execution cannot depend on a previous API-layer check.
+        Resolve and verify the active MT5 account owned by the
+        authenticated user through its dedicated account worker.
         """
-
         account = (
             db.query(MT5TradingAccount)
             .filter(
@@ -453,21 +448,32 @@ class TradeConfirmationService:
                 "for this user."
             )
 
-        try:
-            mt5_connection.verify_account(
-                expected_login=account.mt5_login,
-                expected_server=account.server,
+        if account.id is None:
+            raise TradeConfirmationError(
+                "The user's MetaTrader 5 trading account has no valid "
+                "account identifier."
             )
-        except MT5AccountMismatchError as exc:
+
+        try:
+            status = mt5_worker_manager.status_for_account(
+                account.id,
+                user_id,
+            )
+        except MT5WorkerManagerError as exc:
             raise TradeConfirmationError(
-                "The currently connected MetaTrader 5 account does not "
-                "belong to the authenticated user."
+                "The user's MetaTrader 5 account worker could not be "
+                "verified."
             ) from exc
-        except MT5ConnectionError as exc:
+
+        if not status.get("running"):
             raise TradeConfirmationError(
-                "MetaTrader 5 ownership could not be verified because "
-                "the trading terminal is unavailable."
-            ) from exc
+                "The user's MetaTrader 5 account worker is not running."
+            )
+
+        if not status.get("connected"):
+            raise TradeConfirmationError(
+                "The user's MetaTrader 5 account is not connected."
+            )
 
         return account
 
@@ -477,29 +483,32 @@ class TradeConfirmationService:
         user_id: int,
     ) -> tuple[MT5TradingAccount, list[dict]]:
         """
-        Verify MT5 ownership first, then read platform-owned positions.
-
-        PositionManager is deliberately called only after the live MT5
-        login/server has been verified against the authenticated user.
+        Verify account ownership through the account-scoped worker,
+        then read positions from that same isolated MT5 account.
         """
-
         account = self._get_verified_mt5_account(
             db,
             user_id,
         )
 
-        position_manager = PositionManager()
+        if account.id is None:
+            raise TradeConfirmationError(
+                "The user's MetaTrader 5 account has no valid "
+                "account identifier."
+            )
 
         try:
-            open_positions = position_manager.get_positions()
-        except MT5ConnectionError as exc:
+            open_positions = mt5_worker_manager.get_positions(
+                account.id,
+                user_id,
+            )
+        except MT5WorkerManagerError as exc:
             raise TradeConfirmationError(
-                "Open MT5 positions could not be read after account "
-                "ownership verification."
+                "Open MT5 positions could not be read from the "
+                "user's isolated account worker."
             ) from exc
 
         return account, open_positions
-
     def _check_max_open_trades(
         self,
         db: Session,
