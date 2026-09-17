@@ -431,6 +431,8 @@ class MT5ExecutionService:
     def execute(
         self,
         *,
+        mt5_account_id: int,
+        user_id: int,
         symbol: str,
         direction: str,
         volume: Any,
@@ -1468,8 +1470,8 @@ class MT5ExecutionService:
 
         try:
             result = mt5_worker_manager.execute_order(
-                mt5_account_id=self.mt5_account_id,
-                user_id=self.user_id,
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
                 request=request,
             )
 
@@ -1482,6 +1484,21 @@ class MT5ExecutionService:
             "MT5 ORDER_SEND RESULT %s",
             result,
         )
+
+        if isinstance(result, dict):
+            class WorkerResult:
+                pass
+
+            worker_result = WorkerResult()
+
+            for key, value in result.items():
+                setattr(
+                    worker_result,
+                    key,
+                    value,
+                )
+
+            result = worker_result
 
         if result is None:
             error_code, error_message = (

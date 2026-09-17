@@ -1478,6 +1478,8 @@ class TradeConfirmationService:
 
             execution_result = (
                 mt5_execution_service.execute(
+                    mt5_account_id=verified_mt5_account.id,
+                    user_id=user_id,
                     symbol=intent.symbol,
                     direction=direction,
                     volume=intent.volume,
