@@ -125,6 +125,56 @@ class MT5WorkerManager:
 
             return status
 
+    def get_positions(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Return positions from one user's isolated MT5 worker.
+
+        The MT5 API itself is accessed only inside the account worker
+        process. The parent process never calls MetaTrader5 directly.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None:
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            if not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_positions(symbol)
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 positions for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
+
     def stop_account(
         self,
         mt5_account_id: int,
