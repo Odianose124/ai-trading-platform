@@ -12,13 +12,11 @@ class MT5RuntimeConfigurationError(RuntimeError):
 @dataclass(frozen=True)
 class MT5AccountRuntime:
     """
-    Account-scoped MetaTrader 5 runtime configuration.
+    Immutable runtime identity for one registered MT5 trading account.
 
-    A runtime belongs to exactly one registered MT5 trading account.
-    It does not contain passwords or mutable MT5 connection state.
-
-    The actual MetaTrader 5 Python connection will live inside the
-    dedicated worker process associated with this runtime.
+    This object does not hold an MT5 connection and does not hold a
+    password. The actual MetaTrader 5 connection will be owned by the
+    dedicated account worker.
     """
 
     mt5_account_id: int
@@ -60,14 +58,13 @@ class MT5AccountRuntime:
                 "MT5_RUNTIME_ROOT is not configured."
             )
 
-        runtime_root = Path(
-            settings.MT5_RUNTIME_ROOT
-        ).expanduser().resolve()
-
-        runtime_directory = (
-            runtime_root
-            / str(account.id)
+        runtime_root = (
+            Path(settings.MT5_RUNTIME_ROOT)
+            .expanduser()
+            .resolve()
         )
+
+        runtime_directory = runtime_root / str(account.id)
 
         terminal_path = (
             runtime_directory
@@ -85,11 +82,10 @@ class MT5AccountRuntime:
 
     def validate(self) -> None:
         """
-        Validate the runtime before a worker is allowed to use it.
+        Validate that the account runtime has been provisioned.
 
-        This intentionally does not create directories or copy terminal
-        files automatically. Provisioning will be handled by the dedicated
-        MT5 runtime manager.
+        This method deliberately does not create directories or copy
+        terminal files. Provisioning belongs to the runtime manager.
         """
 
         if not self.runtime_directory.exists():
@@ -123,3 +119,4 @@ class MT5AccountRuntime:
             "login": self.login,
             "server": self.server,
         }
+
