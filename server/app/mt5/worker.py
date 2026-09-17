@@ -364,6 +364,165 @@ class MT5AccountWorker:
             ),
         }
 
+    # ------------------------------------------------------------------
+    # HISTORY
+    # ------------------------------------------------------------------
+
+    def get_history_order_position_ids(
+        self,
+        order_ticket: int,
+    ) -> list[int]:
+        """
+        Resolve position identities associated with one MT5 order ticket.
+
+        The history query executes inside this account's dedicated worker
+        process, so the result can never come from another account's
+        process-global MT5 session.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        try:
+            normalized_ticket = int(order_ticket)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Order ticket must be an integer."
+            ) from exc
+
+        orders = mt5.history_orders_get(
+            ticket=normalized_ticket,
+        )
+
+        if orders is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 order history: "
+                f"{error}"
+            )
+
+        position_ids: set[int] = set()
+
+        for order in orders:
+            position_id = getattr(
+                order,
+                "position_id",
+                None,
+            )
+
+            if position_id:
+                position_ids.add(int(position_id))
+
+        return sorted(position_ids)
+
+    def get_history_order_deal_position_ids(
+        self,
+        order_ticket: int,
+    ) -> list[int]:
+        """
+        Resolve position identities associated with deals belonging to
+        one MT5 order ticket.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        try:
+            normalized_ticket = int(order_ticket)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Order ticket must be an integer."
+            ) from exc
+
+        deals = mt5.history_deals_get(
+            ticket=normalized_ticket,
+        )
+
+        if deals is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 deal history: "
+                f"{error}"
+            )
+
+        position_ids: set[int] = set()
+
+        for deal in deals:
+            position_id = getattr(
+                deal,
+                "position_id",
+                None,
+            )
+
+            if position_id:
+                position_ids.add(int(position_id))
+
+        return sorted(position_ids)
+
+    def get_history_deal_position_id(
+        self,
+        deal_ticket: int,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> int | None:
+        """
+        Find the position identity for one deal ticket inside the
+        caller-provided execution-time history window.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        try:
+            normalized_ticket = int(deal_ticket)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Deal ticket must be an integer."
+            ) from exc
+
+        deals = mt5.history_deals_get(
+            date_from,
+            date_to,
+        )
+
+        if deals is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 deal history: "
+                f"{error}"
+            )
+
+        position_ids: set[int] = set()
+
+        for deal in deals:
+            if int(
+                getattr(deal, "ticket", 0)
+            ) != normalized_ticket:
+                continue
+
+            position_id = getattr(
+                deal,
+                "position_id",
+                None,
+            )
+
+            if position_id:
+                position_ids.add(int(position_id))
+
+        if len(position_ids) != 1:
+            return None
+
+        return next(iter(position_ids))
+
     @staticmethod
     def _serialize_position(
         position: Any,

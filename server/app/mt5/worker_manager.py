@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+from datetime import datetime
 from threading import RLock
 from typing import Any
 
@@ -253,6 +254,140 @@ class MT5WorkerManager:
             except MT5WorkerProcessError as exc:
                 raise MT5WorkerManagerError(
                     f"Unable to read MT5 position summary for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
+
+    def get_history_order_position_ids(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        order_ticket: int,
+    ) -> list[int]:
+        """
+        Return position identities from an MT5 order history record.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_history_order_position_ids(
+                    order_ticket
+                )
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 order history for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
+
+    def get_history_order_deal_position_ids(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        order_ticket: int,
+    ) -> list[int]:
+        """
+        Return position identities from deals belonging to an order.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_history_order_deal_position_ids(
+                    order_ticket
+                )
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 order deal history for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
+
+    def get_history_deal_position_id(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        deal_ticket: int,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> int | None:
+        """
+        Return the position identity for a deal inside an MT5 history
+        window.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_history_deal_position_id(
+                    deal_ticket,
+                    date_from,
+                    date_to,
+                )
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 deal history for account "
                     f"{mt5_account_id}: {exc}"
                 ) from exc
 

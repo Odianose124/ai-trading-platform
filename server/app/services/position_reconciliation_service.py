@@ -1,20 +1,21 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
-import MetaTrader5 as mt5
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.execution.position_manager import PositionManager
 from app.models.managed_position import ManagedPosition
 from app.models.management_profile import ManagementProfile
 from app.models.mt5_trading_account import MT5TradingAccount
 from app.models.trade_intent import TradeIntent
-from app.mt5.connection import MT5ConnectionError, mt5_connection
+from app.mt5.worker_manager import (
+    MT5WorkerManagerError,
+    mt5_worker_manager,
+)
 
 
 class PositionReconciliationError(Exception):
@@ -115,20 +116,14 @@ class PositionReconciliationService:
     A position is only considered reconciled after the actual MT5
     position has been read and all critical execution attributes
     have been verified.
+
+    All MT5 broker interaction is account-scoped through
+    mt5_worker_manager. The FastAPI process never accesses the
+    process-global MetaTrader5 Python session directly.
     """
 
     VOLUME_TOLERANCE = Decimal("0.00000001")
     DEFAULT_PRICE_TOLERANCE = Decimal("0.00000001")
-
-    def __init__(
-        self,
-        position_manager: PositionManager | None = None,
-    ) -> None:
-        self.position_manager = (
-            position_manager
-            if position_manager is not None
-            else PositionManager()
-        )
 
     # ==============================================================
     # Basic helpers
@@ -181,49 +176,24 @@ class PositionReconciliationService:
         broker_symbol: str | None,
     ) -> Decimal:
         """
-        Determine a safe comparison tolerance from the actual MT5 symbol
-        precision.
+        Return the existing conservative fallback tolerance.
 
-        MT5 may normalize submitted prices to the broker's configured
-        number of digits. Reconciliation must therefore compare values
-        at broker precision rather than requiring a mathematically exact
-        decimal match.
+        Broker symbol metadata is not read from the FastAPI process.
+        Account-scoped broker metadata will be added to the worker layer
+        when the broker-validation/reconciliation precision boundary is
+        migrated there.
 
-        The fallback remains deliberately small if symbol metadata cannot
-        be read.
+        Keeping the existing fallback here prevents this migration from
+        inventing broker precision or silently changing the existing
+        reconciliation contract.
         """
 
-        symbol = (
-            str(broker_symbol or "").strip()
-        )
+        symbol = str(broker_symbol or "").strip()
 
         if not symbol:
             return cls.DEFAULT_PRICE_TOLERANCE
 
-        try:
-            info = mt5.symbol_info(symbol)
-        except Exception:
-            info = None
-
-        if info is None:
-            return cls.DEFAULT_PRICE_TOLERANCE
-
-        digits = getattr(info, "digits", None)
-
-        try:
-            digits = int(digits)
-        except (TypeError, ValueError):
-            return cls.DEFAULT_PRICE_TOLERANCE
-
-        if digits < 0:
-            return cls.DEFAULT_PRICE_TOLERANCE
-
-        tolerance = Decimal("1").scaleb(-digits)
-
-        if tolerance <= Decimal("0"):
-            return cls.DEFAULT_PRICE_TOLERANCE
-
-        return tolerance
+        return cls.DEFAULT_PRICE_TOLERANCE
 
     # ==============================================================
     # Result helpers
@@ -273,27 +243,58 @@ class PositionReconciliationService:
     def _verify_mt5_connection(
         self,
         mt5_account: MT5TradingAccount,
+        user_id: int,
     ) -> list[str]:
         checks: list[str] = []
 
-        try:
-            mt5_connection.ensure_connected()
-        except MT5ConnectionError as exc:
+        if mt5_account.id is None:
             raise PositionReconciliationError(
-                f"MT5 connection unavailable: {exc}"
-            ) from exc
-
-        try:
-            mt5_connection.verify_account(
-                expected_login=int(mt5_account.mt5_login),
-                expected_server=str(mt5_account.server),
+                "MT5 trading account has no database ID."
             )
-        except Exception as exc:
+
+        if mt5_account.user_id != user_id:
             raise PositionReconciliationError(
-                f"MT5 account ownership verification failed: {exc}"
+                "MT5 trading account does not belong to the authenticated user."
+            )
+
+        try:
+            status = mt5_worker_manager.status_for_account(
+                mt5_account_id=int(mt5_account.id),
+                user_id=int(user_id),
+            )
+        except MT5WorkerManagerError as exc:
+            raise PositionReconciliationError(
+                f"MT5 account worker status unavailable: {exc}"
             ) from exc
 
-        checks.append("MT5 connection verified.")
+        if not status.connected:
+            raise PositionReconciliationError(
+                "MT5 account worker is not connected."
+            )
+
+        if status.mt5_account_id != int(mt5_account.id):
+            raise PositionReconciliationError(
+                "MT5 worker account identity does not match the trading account."
+            )
+
+        if status.user_id != int(user_id):
+            raise PositionReconciliationError(
+                "MT5 worker user ownership does not match the authenticated user."
+            )
+
+        if status.login != int(mt5_account.mt5_login):
+            raise PositionReconciliationError(
+                "MT5 worker login does not match the owned trading account."
+            )
+
+        if status.server.strip().lower() != str(
+            mt5_account.server
+        ).strip().lower():
+            raise PositionReconciliationError(
+                "MT5 worker server does not match the owned trading account."
+            )
+
+        checks.append("MT5 account worker connection verified.")
         checks.append(
             "MT5 account login and server match the owned trading account."
         )
@@ -306,13 +307,28 @@ class PositionReconciliationService:
 
     def _find_position(
         self,
+        *,
+        mt5_account_id: int,
+        user_id: int,
         position_ticket: int,
     ) -> dict[str, Any] | None:
-        return self.position_manager.get_position(position_ticket)
+        try:
+            return mt5_worker_manager.get_position(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
+                ticket=position_ticket,
+            )
+        except MT5WorkerManagerError as exc:
+            raise PositionReconciliationError(
+                f"Unable to read the account-scoped MT5 position: {exc}"
+            ) from exc
 
     def _find_position_from_intent(
         self,
+        *,
         intent: TradeIntent,
+        mt5_account_id: int,
+        user_id: int,
     ) -> dict[str, Any] | None:
         """
         Resolve the actual MT5 position from broker execution evidence.
@@ -350,44 +366,45 @@ class PositionReconciliationService:
 
         if order_ticket is not None:
             try:
-                orders = mt5.history_orders_get(
-                    ticket=order_ticket
-                )
-            except Exception:
-                orders = None
-
-            if orders:
-                for order in orders:
-                    position_id = getattr(
-                        order,
-                        "position_id",
-                        None,
+                order_position_ids = (
+                    mt5_worker_manager.get_history_order_position_ids(
+                        mt5_account_id=mt5_account_id,
+                        user_id=user_id,
+                        order_ticket=order_ticket,
                     )
-
-                    if position_id:
-                        candidate_position_ids.add(
-                            int(position_id)
-                        )
-
-            try:
-                deals = mt5.history_deals_get(
-                    ticket=order_ticket
                 )
-            except Exception:
-                deals = None
+            except MT5WorkerManagerError as exc:
+                raise PositionReconciliationError(
+                    "Unable to inspect MT5 order history for "
+                    f"order {order_ticket}: {exc}"
+                ) from exc
 
-            if deals:
-                for deal in deals:
-                    position_id = getattr(
-                        deal,
-                        "position_id",
-                        None,
-                    )
+            candidate_position_ids.update(
+                int(position_id)
+                for position_id in order_position_ids
+                if position_id
+            )
 
-                    if position_id:
-                        candidate_position_ids.add(
-                            int(position_id)
+            if not candidate_position_ids:
+                try:
+                    deal_position_ids = (
+                        mt5_worker_manager.get_history_order_deal_position_ids(
+                            mt5_account_id=mt5_account_id,
+                            user_id=user_id,
+                            order_ticket=order_ticket,
                         )
+                    )
+                except MT5WorkerManagerError as exc:
+                    raise PositionReconciliationError(
+                        "Unable to inspect MT5 deal history for "
+                        f"order {order_ticket}: {exc}"
+                    ) from exc
+
+                candidate_position_ids.update(
+                    int(position_id)
+                    for position_id in deal_position_ids
+                    if position_id
+                )
 
         # ----------------------------------------------------------
         # 2. If only a deal ticket is available, locate that deal
@@ -415,31 +432,31 @@ class PositionReconciliationService:
                     timestamp + 300,
                     tz=timezone.utc,
                 )
+            except (TypeError, ValueError, OSError) as exc:
+                raise PositionReconciliationError(
+                    "Unable to calculate the execution-time history window."
+                ) from exc
 
-                deals = mt5.history_deals_get(
-                    date_from,
-                    date_to,
-                )
-            except Exception:
-                deals = None
-
-            if deals:
-                for deal in deals:
-                    if int(
-                        getattr(deal, "ticket", 0)
-                    ) != deal_ticket:
-                        continue
-
-                    position_id = getattr(
-                        deal,
-                        "position_id",
-                        None,
+            try:
+                position_id = (
+                    mt5_worker_manager.get_history_deal_position_id(
+                        mt5_account_id=mt5_account_id,
+                        user_id=user_id,
+                        deal_ticket=deal_ticket,
+                        date_from=date_from,
+                        date_to=date_to,
                     )
+                )
+            except MT5WorkerManagerError as exc:
+                raise PositionReconciliationError(
+                    "Unable to inspect MT5 deal history for "
+                    f"deal {deal_ticket}: {exc}"
+                ) from exc
 
-                    if position_id:
-                        candidate_position_ids.add(
-                            int(position_id)
-                        )
+            if position_id:
+                candidate_position_ids.add(
+                    int(position_id)
+                )
 
         # ----------------------------------------------------------
         # 3. Exactly one position identity must be proven.
@@ -452,15 +469,11 @@ class PositionReconciliationService:
             iter(candidate_position_ids)
         )
 
-        position = self.position_manager.get_position(
-            position_ticket
+        return self._find_position(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            position_ticket=position_ticket,
         )
-
-        if position is None:
-            return None
-
-        return position
-
 
     # ==============================================================
     # Validation
@@ -992,11 +1005,30 @@ class PositionReconciliationService:
                 ),
             )
 
-        checks.extend(
-            self._verify_mt5_connection(
-                mt5_account
+        try:
+            checks.extend(
+                self._verify_mt5_connection(
+                    mt5_account,
+                    user_id,
+                )
             )
-        )
+        except PositionReconciliationError as exc:
+            return self._failure(
+                user_id=user_id,
+                mt5_account_id=mt5_account.id,
+                intent_id=intent.id,
+                position_ticket=position_ticket,
+                broker_symbol=intent.broker_symbol or intent.symbol,
+                direction=self._normalize_direction(
+                    intent.direction
+                ),
+                checks=checks,
+                warnings=warnings,
+                errors=[str(exc)],
+                message=(
+                    "The account-scoped MT5 worker could not be verified."
+                ),
+            )
 
         # ----------------------------------------------------------
         # 4. Find actual broker position
@@ -1007,14 +1039,18 @@ class PositionReconciliationService:
         if position_ticket is not None:
             try:
                 actual_position = self._find_position(
-                    int(position_ticket)
+                    mt5_account_id=int(mt5_account.id),
+                    user_id=user_id,
+                    position_ticket=int(position_ticket),
                 )
             except (TypeError, ValueError):
                 actual_position = None
 
         if actual_position is None:
             actual_position = self._find_position_from_intent(
-                intent
+                intent=intent,
+                mt5_account_id=int(mt5_account.id),
+                user_id=user_id,
             )
 
         if actual_position is None:

@@ -1,15 +1,13 @@
 ﻿from __future__ import annotations
 
-import logging
 import multiprocessing
+from datetime import datetime
 from multiprocessing.connection import Connection
 from threading import RLock
 from typing import Any
 
 from app.mt5.runtime import MT5AccountRuntime
 from app.mt5.worker import MT5AccountWorker
-
-logger = logging.getLogger(__name__)
 
 
 class MT5WorkerProcessError(RuntimeError):
@@ -120,6 +118,116 @@ def _worker_process_entry(
                 )
                 continue
 
+            if action == "get_history_order_position_ids":
+                order_ticket = command.get("order_ticket")
+
+                try:
+                    order_ticket = int(order_ticket)
+                except (TypeError, ValueError):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The order ticket must be an integer."
+                            ),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "history_order_position_ids",
+                        "position_ids": (
+                            worker.get_history_order_position_ids(
+                                order_ticket
+                            )
+                        ),
+                    }
+                )
+                continue
+
+            if action == "get_history_order_deal_position_ids":
+                order_ticket = command.get("order_ticket")
+
+                try:
+                    order_ticket = int(order_ticket)
+                except (TypeError, ValueError):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The order ticket must be an integer."
+                            ),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "history_order_deal_position_ids",
+                        "position_ids": (
+                            worker.get_history_order_deal_position_ids(
+                                order_ticket
+                            )
+                        ),
+                    }
+                )
+                continue
+
+            if action == "get_history_deal_position_id":
+                deal_ticket = command.get("deal_ticket")
+                date_from = command.get("date_from")
+                date_to = command.get("date_to")
+
+                try:
+                    deal_ticket = int(deal_ticket)
+                except (TypeError, ValueError):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The deal ticket must be an integer."
+                            ),
+                        }
+                    )
+                    continue
+
+                if not isinstance(date_from, datetime):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The history start time must be a datetime."
+                            ),
+                        }
+                    )
+                    continue
+
+                if not isinstance(date_to, datetime):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The history end time must be a datetime."
+                            ),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "history_deal_position_id",
+                        "position_id": (
+                            worker.get_history_deal_position_id(
+                                deal_ticket,
+                                date_from,
+                                date_to,
+                            )
+                        ),
+                    }
+                )
+                continue
+
             if action == "stop":
                 worker.stop()
 
@@ -138,7 +246,9 @@ def _worker_process_entry(
             )
 
     except Exception as exc:
-        logger.exception(
+        import logging
+
+        logging.getLogger(__name__).exception(
             "MT5 worker process failed | mt5_account_id=%s",
             runtime.mt5_account_id,
         )
@@ -157,7 +267,9 @@ def _worker_process_entry(
         try:
             worker.stop()
         except Exception:
-            logger.exception(
+            import logging
+
+            logging.getLogger(__name__).exception(
                 "Failed to cleanly stop MT5 worker | mt5_account_id=%s",
                 runtime.mt5_account_id,
             )
@@ -289,9 +401,6 @@ class MT5WorkerProcess:
     ) -> list[dict[str, Any]]:
         """
         Request account-scoped positions from the dedicated worker.
-
-        The actual MetaTrader5 API call executes inside the worker
-        process, never inside the FastAPI parent process.
         """
 
         with self._lock:
@@ -435,6 +544,191 @@ class MT5WorkerProcess:
 
             return summary
 
+    def get_history_order_position_ids(
+        self,
+        order_ticket: int,
+    ) -> list[int]:
+        """
+        Request position identities from an MT5 order history record.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            try:
+                normalized_ticket = int(order_ticket)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "Order ticket must be an integer."
+                ) from exc
+
+            self._send_command(
+                {
+                    "action": "get_history_order_position_ids",
+                    "order_ticket": normalized_ticket,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker order history request failed.",
+                    )
+                )
+
+            if response.get("type") != "history_order_position_ids":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "order history response."
+                )
+
+            position_ids = response.get("position_ids")
+
+            if not isinstance(position_ids, list):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid order "
+                    "history position ID payload."
+                )
+
+            return [
+                int(position_id)
+                for position_id in position_ids
+            ]
+
+    def get_history_order_deal_position_ids(
+        self,
+        order_ticket: int,
+    ) -> list[int]:
+        """
+        Request position identities from deals belonging to an order.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            try:
+                normalized_ticket = int(order_ticket)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "Order ticket must be an integer."
+                ) from exc
+
+            self._send_command(
+                {
+                    "action": "get_history_order_deal_position_ids",
+                    "order_ticket": normalized_ticket,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker deal history request failed.",
+                    )
+                )
+
+            if response.get("type") != "history_order_deal_position_ids":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "order deal history response."
+                )
+
+            position_ids = response.get("position_ids")
+
+            if not isinstance(position_ids, list):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid order deal "
+                    "history position ID payload."
+                )
+
+            return [
+                int(position_id)
+                for position_id in position_ids
+            ]
+
+    def get_history_deal_position_id(
+        self,
+        deal_ticket: int,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> int | None:
+        """
+        Request the position identity for a deal inside an execution
+        history window.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            try:
+                normalized_ticket = int(deal_ticket)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "Deal ticket must be an integer."
+                ) from exc
+
+            if not isinstance(date_from, datetime):
+                raise MT5WorkerProcessError(
+                    "History start time must be a datetime."
+                )
+
+            if not isinstance(date_to, datetime):
+                raise MT5WorkerProcessError(
+                    "History end time must be a datetime."
+                )
+
+            self._send_command(
+                {
+                    "action": "get_history_deal_position_id",
+                    "deal_ticket": normalized_ticket,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker deal history request failed.",
+                    )
+                )
+
+            if response.get("type") != "history_deal_position_id":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "deal history response."
+                )
+
+            position_id = response.get("position_id")
+
+            if position_id is None:
+                return None
+
+            try:
+                return int(position_id)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid deal position ID."
+                ) from exc
+
     def stop(self) -> None:
         with self._lock:
             process = self._process
@@ -457,7 +751,9 @@ class MT5WorkerProcess:
                     OSError,
                     MT5WorkerProcessError,
                 ):
-                    logger.warning(
+                    import logging
+
+                    logging.getLogger(__name__).warning(
                         "MT5 worker stopped without a normal response | "
                         "mt5_account_id=%s",
                         self.runtime.mt5_account_id,
@@ -466,7 +762,9 @@ class MT5WorkerProcess:
             process.join(timeout=15)
 
             if process.is_alive():
-                logger.warning(
+                import logging
+
+                logging.getLogger(__name__).warning(
                     "Terminating unresponsive MT5 worker | "
                     "mt5_account_id=%s",
                     self.runtime.mt5_account_id,
