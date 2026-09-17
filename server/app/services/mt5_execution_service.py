@@ -15,6 +15,11 @@ from app.services.broker_validation_service import (
     broker_validation_service,
 )
 
+from app.mt5.worker_manager import (
+    mt5_worker_manager,
+    MT5WorkerManagerError,
+)
+
 
 class MT5ExecutionError(Exception):
     """Raised when an MT5 trade cannot be executed."""
@@ -1447,15 +1452,36 @@ class MT5ExecutionService:
         # SEND ORDER
         # ---------------------------------------------------------
 
-        logger.warning("MT5 ORDER_SEND REQUEST symbol=%s action=%s type=%s volume=%s price=%s sl=%s tp=%s filling=%s execution_mode=%s trade_exemode=%s", broker_symbol, request.get("action"), request.get("type"), request.get("volume"), request.get("price"), request.get("sl"), request.get("tp"), request.get("type_filling"), execution_mode, trade_exemode)
-
-        result = mt5.order_send(
-
-            request
-
+        logger.warning(
+            "MT5 ORDER_SEND REQUEST symbol=%s action=%s type=%s volume=%s price=%s sl=%s tp=%s filling=%s execution_mode=%s trade_exemode=%s",
+            broker_symbol,
+            request.get("action"),
+            request.get("type"),
+            request.get("volume"),
+            request.get("price"),
+            request.get("sl"),
+            request.get("tp"),
+            request.get("type_filling"),
+            execution_mode,
+            trade_exemode,
         )
 
-        logger.warning("MT5 ORDER_SEND RESULT retcode=%s comment=%s order=%s deal=%s last_error=%s", getattr(result, "retcode", None) if result is not None else None, getattr(result, "comment", None) if result is not None else None, getattr(result, "order", None) if result is not None else None, getattr(result, "deal", None) if result is not None else None, mt5.last_error())
+        try:
+            result = mt5_worker_manager.execute_order(
+                mt5_account_id=self.mt5_account_id,
+                user_id=self.user_id,
+                request=request,
+            )
+
+        except MT5WorkerManagerError as exc:
+            raise MT5ExecutionError(
+                f"MT5 worker execution failed: {exc}"
+            ) from exc
+
+        logger.warning(
+            "MT5 ORDER_SEND RESULT %s",
+            result,
+        )
 
         if result is None:
             error_code, error_message = (
