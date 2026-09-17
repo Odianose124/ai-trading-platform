@@ -1,9 +1,11 @@
-from contextlib import asynccontextmanager
+﻿from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
+
+from app.mt5.worker_manager import mt5_worker_manager
 
 from app.api.auth import router as auth_router
 from app.api.mt5 import router as mt5_router
@@ -312,7 +314,4 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }
-
-
-
 

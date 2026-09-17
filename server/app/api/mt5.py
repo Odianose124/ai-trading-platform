@@ -1,4 +1,4 @@
-from fastapi import (
+﻿from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
@@ -12,10 +12,9 @@ from app.database.connection import get_db
 from app.execution.position_manager import PositionManager
 from app.models.mt5_trading_account import MT5TradingAccount
 from app.models.user import User
-from app.mt5.connection import (
-    MT5AccountMismatchError,
-    MT5ConnectionError,
-    mt5_connection,
+from app.mt5.worker_manager import (
+    MT5WorkerManagerError,
+    mt5_worker_manager,
 )
 
 
@@ -64,7 +63,7 @@ def get_user_mt5_account(
     )
 
 
-def require_verified_mt5_account(
+def require_registered_mt5_account(
     db: Session,
     current_user: User,
 ) -> MT5TradingAccount:
@@ -89,24 +88,6 @@ def require_verified_mt5_account(
             detail="The user's MT5 trading account is inactive.",
         )
 
-    try:
-        mt5_connection.verify_account(
-            expected_login=account.mt5_login,
-            expected_server=account.server,
-        )
-
-    except MT5AccountMismatchError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(exc),
-        )
-
-    except MT5ConnectionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        )
-
     return account
 
 
@@ -123,7 +104,6 @@ def register_mt5_account(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-
     existing = get_user_mt5_account(
         db=db,
         current_user=current_user,
@@ -170,6 +150,18 @@ def register_mt5_account(
 
     else:
 
+        if (
+            existing.mt5_login != payload.login
+            or existing.server != payload.server.strip()
+        ):
+            try:
+                mt5_worker_manager.stop_account(
+                    mt5_account_id=existing.id,
+                    user_id=current_user.id,
+                )
+            except MT5WorkerManagerError:
+                pass
+
         existing.mt5_login = payload.login
         existing.server = payload.server.strip()
         existing.account_name = (
@@ -213,36 +205,18 @@ def connect_mt5(
     current_user: User = Depends(get_current_user),
 ):
 
-    account = get_user_mt5_account(
+    account = require_registered_mt5_account(
         db=db,
         current_user=current_user,
     )
 
-    if account is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                "Register an MT5 trading account "
-                "before connecting."
-            ),
-        )
-
-    if not account.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The registered MT5 account is inactive.",
-        )
-
     try:
-        status_data = mt5_connection.connect()
-
-        mt5_connection.verify_account(
-            expected_login=account.mt5_login,
-            expected_server=account.server,
+        worker_status = mt5_worker_manager.start_account(
+            account=account,
         )
 
         return {
-            **status_data,
+            **worker_status,
             "ownership": {
                 "verified": True,
                 "user_id": current_user.id,
@@ -250,17 +224,11 @@ def connect_mt5(
             },
         }
 
-    except MT5AccountMismatchError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(exc),
-        )
-
-    except MT5ConnectionError as exc:
+    except MT5WorkerManagerError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
-        )
+        ) from exc
 
 
 # ----------------------------------------------------------------------
@@ -276,13 +244,16 @@ def get_mt5_status(
     current_user: User = Depends(get_current_user),
 ):
 
-    account = require_verified_mt5_account(
+    account = require_registered_mt5_account(
         db=db,
         current_user=current_user,
     )
 
     try:
-        status_data = mt5_connection.get_status()
+        status_data = mt5_worker_manager.status_for_account(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+        )
 
         return {
             **status_data,
@@ -293,11 +264,11 @@ def get_mt5_status(
             },
         }
 
-    except MT5ConnectionError as exc:
+    except MT5WorkerManagerError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
-        )
+        ) from exc
 
 
 # ----------------------------------------------------------------------
@@ -313,17 +284,32 @@ def disconnect_mt5(
     current_user: User = Depends(get_current_user),
 ):
 
-    require_verified_mt5_account(
+    account = require_registered_mt5_account(
         db=db,
         current_user=current_user,
     )
 
-    mt5_connection.disconnect()
+    try:
+        mt5_worker_manager.stop_account(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+        )
 
-    return {
-        "connected": False,
-        "message": "MetaTrader 5 connection closed.",
-    }
+        return {
+            "connected": False,
+            "message": "MetaTrader 5 account worker stopped.",
+            "ownership": {
+                "verified": True,
+                "user_id": current_user.id,
+                "mt5_account_id": account.id,
+            },
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 
 # ----------------------------------------------------------------------
@@ -340,40 +326,27 @@ def get_mt5_positions(
     current_user: User = Depends(get_current_user),
 ):
 
-    account = require_verified_mt5_account(
+    account = require_registered_mt5_account(
         db=db,
         current_user=current_user,
     )
 
-    try:
-
-        positions = position_manager.get_positions(
-            symbol=symbol,
-        )
-
-        summary = position_manager.summary()
-
-        return {
-            "source": "MetaTrader 5",
-            "magic": position_manager.magic_number,
-            "count": len(positions),
-            "positions": positions,
-            "summary": summary,
-            "ownership": {
-                "verified": True,
-                "user_id": current_user.id,
-                "mt5_account_id": account.id,
-            },
-        }
-
-    except Exception as exc:
+    if not mt5_worker_manager.is_running(
+        mt5_account_id=account.id,
+        user_id=current_user.id,
+    ):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "Unable to load MT5 positions: "
-                f"{exc}"
-            ),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The MT5 account worker is not connected.",
         )
+
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "Account-scoped MT5 position access is being migrated "
+            "to the isolated worker process."
+        ),
+    )
 
 
 # ----------------------------------------------------------------------
@@ -389,29 +362,24 @@ def get_mt5_positions_summary(
     current_user: User = Depends(get_current_user),
 ):
 
-    account = require_verified_mt5_account(
+    account = require_registered_mt5_account(
         db=db,
         current_user=current_user,
     )
 
-    try:
-
-        return {
-            "source": "MetaTrader 5",
-            "magic": position_manager.magic_number,
-            **position_manager.summary(),
-            "ownership": {
-                "verified": True,
-                "user_id": current_user.id,
-                "mt5_account_id": account.id,
-            },
-        }
-
-    except Exception as exc:
+    if not mt5_worker_manager.is_running(
+        mt5_account_id=account.id,
+        user_id=current_user.id,
+    ):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "Unable to load MT5 position summary: "
-                f"{exc}"
-            ),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The MT5 account worker is not connected.",
         )
+
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "Account-scoped MT5 position summary is being migrated "
+            "to the isolated worker process."
+        ),
+    )
