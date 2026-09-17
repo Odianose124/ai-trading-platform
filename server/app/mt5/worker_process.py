@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import multiprocessing
 from datetime import datetime
@@ -223,6 +223,49 @@ def _worker_process_entry(
                                 date_from,
                                 date_to,
                             )
+                        ),
+                    }
+                )
+                continue
+
+            if action == "validate_trade":
+                symbol = command.get("symbol")
+                direction = command.get("direction")
+                volume = command.get("volume")
+                entry_price = command.get("entry_price")
+                stop_loss = command.get("stop_loss")
+                take_profit = command.get("take_profit")
+                order_type = command.get("order_type")
+
+                if not isinstance(symbol, str) or not symbol.strip():
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": "The validation symbol is required.",
+                        }
+                    )
+                    continue
+
+                if not isinstance(direction, str) or not direction.strip():
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": "The validation direction is required.",
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "trade_validation",
+                        "result": worker.validate_trade(
+                            symbol=symbol,
+                            direction=direction,
+                            volume=volume,
+                            entry_price=entry_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            order_type=order_type,
                         ),
                     }
                 )
@@ -728,6 +771,66 @@ class MT5WorkerProcess:
                 raise MT5WorkerProcessError(
                     "MT5 worker returned an invalid deal position ID."
                 ) from exc
+
+    def validate_trade(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        volume: Any,
+        entry_price: Any = None,
+        stop_loss: Any = None,
+        take_profit: Any = None,
+        order_type: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Run broker validation inside the account-specific worker.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            self._send_command(
+                {
+                    "action": "validate_trade",
+                    "symbol": symbol,
+                    "direction": direction,
+                    "volume": volume,
+                    "entry_price": entry_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "order_type": order_type,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker broker validation failed.",
+                    )
+                )
+
+            if response.get("type") != "trade_validation":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "trade validation response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "trade validation payload."
+                )
+
+            return result
 
     def stop(self) -> None:
         with self._lock:

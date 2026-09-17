@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import subprocess
@@ -363,6 +363,48 @@ class MT5AccountWorker:
                 2,
             ),
         }
+
+    # ------------------------------------------------------------------
+    # BROKER VALIDATION
+    # ------------------------------------------------------------------
+
+    def validate_trade(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        volume: Any,
+        entry_price: Any = None,
+        stop_loss: Any = None,
+        take_profit: Any = None,
+        order_type: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Run broker validation inside this account's isolated MT5 worker.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        from app.services.broker_validation_service import (
+            BrokerValidationService,
+        )
+
+        validator = BrokerValidationService()
+
+        result = validator.validate(
+            symbol=symbol,
+            direction=direction,
+            volume=volume,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            order_type=order_type,
+        )
+
+        return result.serialize()
 
     # ------------------------------------------------------------------
     # HISTORY

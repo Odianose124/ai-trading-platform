@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from threading import RLock
@@ -453,6 +453,62 @@ class MT5WorkerManager:
     def registered_accounts(self) -> list[int]:
         with self._lock:
             return list(self._workers.keys())
+
+    def validate_trade(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        *,
+        symbol: str,
+        direction: str,
+        volume: Any,
+        entry_price: Any = None,
+        stop_loss: Any = None,
+        take_profit: Any = None,
+        order_type: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Run broker validation through the user's isolated MT5 worker.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.validate_trade(
+                    symbol=symbol,
+                    direction=direction,
+                    volume=volume,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    order_type=order_type,
+                )
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to validate trade for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
 
     def shutdown_all(self) -> None:
         with self._lock:
