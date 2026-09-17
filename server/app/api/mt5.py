@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.database.connection import get_db
-from app.execution.position_manager import PositionManager
 from app.models.mt5_trading_account import MT5TradingAccount
 from app.models.user import User
 from app.mt5.worker_manager import (
@@ -22,8 +21,6 @@ router = APIRouter(
     prefix="/api/mt5",
     tags=["MetaTrader 5"],
 )
-
-position_manager = PositionManager()
 
 
 class MT5TradingAccountRequest(BaseModel):
@@ -331,22 +328,25 @@ def get_mt5_positions(
         current_user=current_user,
     )
 
-    if not mt5_worker_manager.is_running(
-        mt5_account_id=account.id,
-        user_id=current_user.id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The MT5 account worker is not connected.",
+    try:
+        positions = mt5_worker_manager.get_positions(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+            symbol=symbol,
         )
 
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "Account-scoped MT5 position access is being migrated "
-            "to the isolated worker process."
-        ),
-    )
+        return {
+            "mt5_account_id": account.id,
+            "user_id": current_user.id,
+            "positions": positions,
+            "count": len(positions),
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 
 # ----------------------------------------------------------------------
@@ -367,19 +367,52 @@ def get_mt5_positions_summary(
         current_user=current_user,
     )
 
-    if not mt5_worker_manager.is_running(
-        mt5_account_id=account.id,
-        user_id=current_user.id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The MT5 account worker is not connected.",
+    try:
+        positions = mt5_worker_manager.get_positions(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
         )
 
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "Account-scoped MT5 position summary is being migrated "
-            "to the isolated worker process."
-        ),
-    )
+        total_volume = sum(
+            float(position.get("volume", 0))
+            for position in positions
+        )
+
+        total_profit = sum(
+            float(position.get("profit", 0))
+            for position in positions
+        )
+
+        total_swap = sum(
+            float(position.get("swap", 0))
+            for position in positions
+        )
+
+        buy_positions = sum(
+            1
+            for position in positions
+            if position.get("type") == "buy"
+        )
+
+        sell_positions = sum(
+            1
+            for position in positions
+            if position.get("type") == "sell"
+        )
+
+        return {
+            "mt5_account_id": account.id,
+            "user_id": current_user.id,
+            "total_positions": len(positions),
+            "buy_positions": buy_positions,
+            "sell_positions": sell_positions,
+            "total_volume": total_volume,
+            "total_profit": total_profit,
+            "total_swap": total_swap,
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
