@@ -71,7 +71,10 @@ def _worker_process_entry(
                     connection.send(
                         {
                             "type": "error",
-                            "error": "The position symbol must be a string or null.",
+                            "error": (
+                                "The position symbol must be "
+                                "a string or null."
+                            ),
                         }
                     )
                     continue
@@ -80,6 +83,39 @@ def _worker_process_entry(
                     {
                         "type": "positions",
                         "positions": worker.get_positions(symbol),
+                    }
+                )
+                continue
+
+            if action == "get_position":
+                ticket = command.get("ticket")
+
+                try:
+                    ticket = int(ticket)
+                except (TypeError, ValueError):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The position ticket must be an integer."
+                            ),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "position",
+                        "position": worker.get_position(ticket),
+                    }
+                )
+                continue
+
+            if action == "get_position_summary":
+                connection.send(
+                    {
+                        "type": "position_summary",
+                        "summary": worker.get_position_summary(),
                     }
                 )
                 continue
@@ -159,7 +195,9 @@ class MT5WorkerProcess:
 
             self.runtime.validate()
 
-            parent_connection, child_connection = multiprocessing.Pipe()
+            parent_connection, child_connection = (
+                multiprocessing.Pipe()
+            )
 
             process = multiprocessing.Process(
                 target=_worker_process_entry,
@@ -298,6 +336,104 @@ class MT5WorkerProcess:
                 )
 
             return positions
+
+    def get_position(
+        self,
+        ticket: int,
+    ) -> dict[str, Any] | None:
+        """
+        Request one account-scoped position from the dedicated worker.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            try:
+                normalized_ticket = int(ticket)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "Position ticket must be an integer."
+                ) from exc
+
+            self._send_command(
+                {
+                    "action": "get_position",
+                    "ticket": normalized_ticket,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker position request failed.",
+                    )
+                )
+
+            if response.get("type") != "position":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "single-position response."
+                )
+
+            position = response.get("position")
+
+            if position is not None and not isinstance(
+                position,
+                dict,
+            ):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid position payload."
+                )
+
+            return position
+
+    def get_position_summary(self) -> dict[str, Any]:
+        """
+        Request an account-scoped position summary.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            self._send_command(
+                {
+                    "action": "get_position_summary",
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker position summary request failed.",
+                    )
+                )
+
+            if response.get("type") != "position_summary":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "position summary response."
+                )
+
+            summary = response.get("summary")
+
+            if not isinstance(summary, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid position summary."
+                )
+
+            return summary
 
     def stop(self) -> None:
         with self._lock:

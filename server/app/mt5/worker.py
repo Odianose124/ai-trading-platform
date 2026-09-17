@@ -290,34 +290,111 @@ class MT5AccountWorker:
             ):
                 continue
 
-            if position.type == mt5.POSITION_TYPE_BUY:
-                position_type = "buy"
-
-            elif position.type == mt5.POSITION_TYPE_SELL:
-                position_type = "sell"
-
-            else:
-                continue
-
             result.append(
-                {
-                    "ticket": position.ticket,
-                    "symbol": position.symbol,
-                    "type": position_type,
-                    "volume": position.volume,
-                    "entry_price": position.price_open,
-                    "current_price": position.price_current,
-                    "stop_loss": position.sl,
-                    "take_profit": position.tp,
-                    "profit": position.profit,
-                    "swap": position.swap,
-                    "magic": position.magic,
-                    "time": position.time,
-                    "time_update": position.time_update,
-                }
+                self._serialize_position(position)
             )
 
         return result
+
+    def get_position(
+        self,
+        ticket: int,
+    ) -> dict[str, Any] | None:
+        """
+        Read one platform-owned position from this account's MT5 session.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        try:
+            normalized_ticket = int(ticket)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Position ticket must be an integer."
+            ) from exc
+
+        positions = mt5.positions_get(
+            ticket=normalized_ticket,
+        )
+
+        if positions is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 position: "
+                f"{error}"
+            )
+
+        if not positions:
+            return None
+
+        position = positions[0]
+
+        if position.magic != self.MAGIC_NUMBER:
+            return None
+
+        return self._serialize_position(position)
+
+    def get_position_summary(self) -> dict[str, Any]:
+        """
+        Produce an account-scoped summary of platform-owned positions.
+        """
+
+        positions = self.get_positions()
+
+        total_profit = sum(
+            float(position["profit"])
+            for position in positions
+        )
+
+        total_volume = sum(
+            float(position["volume"])
+            for position in positions
+        )
+
+        return {
+            "open_trades": len(positions),
+            "total_volume": total_volume,
+            "floating_profit": round(
+                total_profit,
+                2,
+            ),
+        }
+
+    @staticmethod
+    def _serialize_position(
+        position: Any,
+    ) -> dict[str, Any]:
+
+        if position.type == mt5.POSITION_TYPE_BUY:
+            position_type = "buy"
+
+        elif position.type == mt5.POSITION_TYPE_SELL:
+            position_type = "sell"
+
+        else:
+            raise MT5WorkerError(
+                f"Unsupported MT5 position type: {position.type}"
+            )
+
+        return {
+            "ticket": position.ticket,
+            "symbol": position.symbol,
+            "type": position_type,
+            "volume": position.volume,
+            "entry_price": position.price_open,
+            "current_price": position.price_current,
+            "stop_loss": position.sl,
+            "take_profit": position.tp,
+            "profit": position.profit,
+            "swap": position.swap,
+            "magic": position.magic,
+            "time": position.time,
+            "time_update": position.time_update,
+        }
 
     # ------------------------------------------------------------------
     # STOP

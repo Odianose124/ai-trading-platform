@@ -175,6 +175,87 @@ class MT5WorkerManager:
                     f"{mt5_account_id}: {exc}"
                 ) from exc
 
+    def get_position(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        ticket: int,
+    ) -> dict[str, Any] | None:
+        """
+        Return one position from the user's isolated MT5 worker.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_position(ticket)
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 position for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
+
+    def get_position_summary(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+    ) -> dict[str, Any]:
+        """
+        Return a summary from the user's isolated MT5 worker.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_position_summary()
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 position summary for account "
+                    f"{mt5_account_id}: {exc}"
+                ) from exc
+
     def stop_account(
         self,
         mt5_account_id: int,
