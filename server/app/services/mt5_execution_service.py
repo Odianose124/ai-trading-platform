@@ -1303,22 +1303,26 @@ class MT5ExecutionService:
             )
 
         if execution_mode == "market":
-            request["price"] = float(
-                final_execution_price.quantize(
-                    Decimal("1").scaleb(-digits)
+            if market_execution:
+                request.pop("price", None)
+                checks.append(
+                    "Market Execution request remains price-less immediately before order_send"
                 )
-            )
-
-            checks.append(
-                "Final market price confirmed immediately before order_send"
-            )
+            else:
+                request["price"] = float(
+                    final_execution_price.quantize(
+                        Decimal("1").scaleb(-digits)
+                    )
+                )
+                checks.append(
+                    "Final market price confirmed immediately before order_send"
+                )
         else:
             request["price"] = float(
                 signal_entry.quantize(
                     Decimal("1").scaleb(-digits)
                 )
             )
-
             checks.append(
                 "Pending activation price confirmed immediately before order_send"
             )
@@ -1648,4 +1652,5 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
+
 
