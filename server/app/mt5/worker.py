@@ -3,8 +3,8 @@
 import logging
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Event, RLock
+from typing import Any
 
 import MetaTrader5 as mt5
 
@@ -39,6 +39,8 @@ class MT5AccountWorker:
     The MetaTrader5 Python module is process-global, so account isolation
     depends on each worker process having exactly one account runtime.
     """
+
+    MAGIC_NUMBER = 202609
 
     def __init__(self, runtime: MT5AccountRuntime) -> None:
         self.runtime = runtime
@@ -216,6 +218,7 @@ class MT5AccountWorker:
 
     def status(self) -> MT5WorkerStatus:
         account_info = mt5.account_info()
+
         terminal_running = (
             self._terminal_process is not None
             and self._terminal_process.poll() is None
@@ -237,6 +240,84 @@ class MT5AccountWorker:
             connected=connected,
             terminal_running=terminal_running,
         )
+
+    # ------------------------------------------------------------------
+    # POSITIONS
+    # ------------------------------------------------------------------
+
+    def get_positions(
+        self,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Read platform-owned positions from this account's MT5 session.
+
+        This method runs only inside the account's dedicated worker
+        process. It never initializes MT5 and never sends an order.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        positions = mt5.positions_get()
+
+        if positions is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 positions: "
+                f"{error}"
+            )
+
+        normalized_symbol = (
+            symbol.strip().upper()
+            if symbol
+            else None
+        )
+
+        result: list[dict[str, Any]] = []
+
+        for position in positions:
+            if position.magic != self.MAGIC_NUMBER:
+                continue
+
+            if (
+                normalized_symbol
+                and str(position.symbol).upper()
+                != normalized_symbol
+            ):
+                continue
+
+            if position.type == mt5.POSITION_TYPE_BUY:
+                position_type = "buy"
+
+            elif position.type == mt5.POSITION_TYPE_SELL:
+                position_type = "sell"
+
+            else:
+                continue
+
+            result.append(
+                {
+                    "ticket": position.ticket,
+                    "symbol": position.symbol,
+                    "type": position_type,
+                    "volume": position.volume,
+                    "entry_price": position.price_open,
+                    "current_price": position.price_current,
+                    "stop_loss": position.sl,
+                    "take_profit": position.tp,
+                    "profit": position.profit,
+                    "swap": position.swap,
+                    "magic": position.magic,
+                    "time": position.time,
+                    "time_update": position.time_update,
+                }
+            )
+
+        return result
 
     # ------------------------------------------------------------------
     # STOP

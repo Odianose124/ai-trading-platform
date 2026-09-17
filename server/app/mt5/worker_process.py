@@ -64,6 +64,26 @@ def _worker_process_entry(
                 )
                 continue
 
+            if action == "get_positions":
+                symbol = command.get("symbol")
+
+                if symbol is not None and not isinstance(symbol, str):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": "The position symbol must be a string or null.",
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "positions",
+                        "positions": worker.get_positions(symbol),
+                    }
+                )
+                continue
+
             if action == "stop":
                 worker.stop()
 
@@ -224,6 +244,60 @@ class MT5WorkerProcess:
             return self._serialize_status(
                 response.get("status")
             )
+
+    def get_positions(
+        self,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Request account-scoped positions from the dedicated worker.
+
+        The actual MetaTrader5 API call executes inside the worker
+        process, never inside the FastAPI parent process.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            normalized_symbol = (
+                symbol.strip().upper()
+                if symbol
+                else None
+            )
+
+            self._send_command(
+                {
+                    "action": "get_positions",
+                    "symbol": normalized_symbol,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker position request failed.",
+                    )
+                )
+
+            if response.get("type") != "positions":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected position response."
+                )
+
+            positions = response.get("positions")
+
+            if not isinstance(positions, list):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid positions payload."
+                )
+
+            return positions
 
     def stop(self) -> None:
         with self._lock:
