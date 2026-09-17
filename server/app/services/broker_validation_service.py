@@ -761,12 +761,6 @@ class BrokerValidationService:
         # EXECUTION PRICE
         # --------------------------------------------------------
 
-        execution_price = (
-            ask
-            if normalized_direction == "buy"
-            else bid
-        )
-
         supplied_entry = (
             self._decimal(entry_price)
             if entry_price is not None
@@ -779,22 +773,66 @@ class BrokerValidationService:
                 "Entry price is required"
             )
 
+            execution_price = (
+                ask
+                if normalized_direction == "buy"
+                else bid
+            )
+
+            pending_entry = False
+
         else:
 
-            # We intentionally do not execute at an old signal price.
-            # Market execution must use the current broker side.
-            price_difference = abs(
-                supplied_entry - execution_price
+            market_price = (
+                ask
+                if normalized_direction == "buy"
+                else bid
             )
 
             tolerance = point
 
-            if price_difference > tolerance:
-                warnings.append(
-                    f"Signal entry {supplied_entry} differs from "
-                    f"current executable price {execution_price} "
-                    f"by {price_difference}"
+            pending_entry = (
+                abs(supplied_entry - market_price)
+                > tolerance
+            )
+
+            if pending_entry:
+                execution_price = supplied_entry
+
+                if normalized_direction == "buy":
+                    pending_type = (
+                        "BUY_STOP"
+                        if supplied_entry > ask
+                        else "BUY_LIMIT"
+                    )
+                else:
+                    pending_type = (
+                        "SELL_STOP"
+                        if supplied_entry < bid
+                        else "SELL_LIMIT"
+                    )
+
+                checks.append(
+                    f"Entry classified as pending {pending_type}"
                 )
+
+            else:
+                execution_price = market_price
+
+                checks.append(
+                    "Entry classified as market execution"
+                )
+
+                price_difference = abs(
+                    supplied_entry - execution_price
+                )
+
+                if price_difference > tolerance:
+                    warnings.append(
+                        f"Signal entry {supplied_entry} differs from "
+                        f"current executable price {execution_price} "
+                        f"by {price_difference}"
+                    )
 
         # --------------------------------------------------------
         # TRADE MODE
@@ -987,15 +1025,36 @@ class BrokerValidationService:
 
         if requested_volume is not None:
 
-            order_type = self.SUPPORTED_DIRECTIONS[
-                normalized_direction
-            ]
+            if pending_entry and supplied_entry is not None:
+
+                if normalized_direction == "buy":
+                    order_type = (
+                        mt5.ORDER_TYPE_BUY_STOP
+                        if supplied_entry > ask
+                        else mt5.ORDER_TYPE_BUY_LIMIT
+                    )
+                else:
+                    order_type = (
+                        mt5.ORDER_TYPE_SELL_STOP
+                        if supplied_entry < bid
+                        else mt5.ORDER_TYPE_SELL_LIMIT
+                    )
+
+                margin_price = supplied_entry
+
+            else:
+
+                order_type = self.SUPPORTED_DIRECTIONS[
+                    normalized_direction
+                ]
+
+                margin_price = execution_price
 
             margin_required_raw = mt5.order_calc_margin(
                 order_type,
                 broker_symbol,
                 float(requested_volume),
-                float(execution_price),
+                float(margin_price),
             )
 
             if margin_required_raw is None:

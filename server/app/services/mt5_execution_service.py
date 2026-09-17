@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -303,8 +303,7 @@ class MT5ExecutionService:
         self,
         symbol_info: Any,
     ) -> int:
-
-        filling_mode = int(
+        filling_flags = int(
             getattr(
                 symbol_info,
                 "filling_mode",
@@ -313,45 +312,39 @@ class MT5ExecutionService:
             or 0
         )
 
-        # MetaTrader 5 exposes symbol_info.filling_mode
-        # as a capability bitmask, not as the value that
-        # should be passed directly to request["type_filling"].
-        #
-        # Example:
-        #   filling_mode == 3
-        # means IOC + FOK are supported.
-        #
-        # MT5 request type_filling must instead receive
-        # ORDER_FILLING_IOC or ORDER_FILLING_FOK.
-
-        if filling_mode & getattr(
+        symbol_fok = getattr(
             mt5,
-            "ORDER_FILLING_IOC",
+            "SYMBOL_FILLING_FOK",
             1,
-        ):
-            return getattr(
-                mt5,
-                "ORDER_FILLING_IOC",
-                1,
-            )
+        )
 
-        if filling_mode & getattr(
+        symbol_ioc = getattr(
+            mt5,
+            "SYMBOL_FILLING_IOC",
+            2,
+        )
+
+        order_fok = getattr(
             mt5,
             "ORDER_FILLING_FOK",
             0,
-        ):
-            return getattr(
-                mt5,
-                "ORDER_FILLING_FOK",
-                0,
-            )
+        )
 
-        # Only use RETURN when the broker does not expose
-        # the IOC/FOK capability flags.
-        return getattr(
+        order_ioc = getattr(
             mt5,
-            "ORDER_FILLING_RETURN",
-            2,
+            "ORDER_FILLING_IOC",
+            1,
+        )
+
+        if filling_flags & symbol_ioc:
+            return order_ioc
+
+        if filling_flags & symbol_fok:
+            return order_fok
+
+        raise MT5ExecutionError(
+            "Broker does not advertise a supported FOK or IOC "
+            "filling policy for market execution."
         )
 
     def _classify_order_type(
@@ -1145,12 +1138,34 @@ class MT5ExecutionService:
         # BUILD MT5 REQUEST
         # ---------------------------------------------------------
 
+        trade_exemode = int(
+            getattr(
+                symbol_info,
+                "trade_exemode",
+                getattr(
+                    mt5,
+                    "SYMBOL_TRADE_EXECUTION_INSTANT",
+                    1,
+                ),
+            )
+            or 0
+        )
+
+        market_execution = (
+            trade_exemode
+            == getattr(
+                mt5,
+                "SYMBOL_TRADE_EXECUTION_MARKET",
+                2,
+            )
+        )
+
         if execution_mode == "pending":
             filling_mode = mt5.ORDER_FILLING_RETURN
             trade_action = mt5.TRADE_ACTION_PENDING
             request_price = signal_entry
             checks.append(
-                "MT5 pending-order request constructed"
+                "MT5 pending-order request constructed with RETURN filling"
             )
         else:
             filling_mode = self._select_filling_mode(
@@ -1158,8 +1173,13 @@ class MT5ExecutionService:
             )
             trade_action = mt5.TRADE_ACTION_DEAL
             request_price = execution_price
+
             checks.append(
                 "MT5 market-order request constructed"
+            )
+
+            checks.append(
+                f"MT5 symbol trade execution mode={trade_exemode}"
             )
 
         request = {
@@ -1167,7 +1187,6 @@ class MT5ExecutionService:
             "symbol": broker_symbol,
             "volume": float(requested_volume),
             "type": order_type,
-            "price": float(request_price),
             "sl": float(requested_stop_loss),
             "tp": float(requested_take_profit),
             "deviation": 20,
@@ -1176,6 +1195,16 @@ class MT5ExecutionService:
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": filling_mode,
         }
+
+        if not (
+            execution_mode == "market"
+            and market_execution
+        ):
+            request["price"] = float(request_price)
+        else:
+            checks.append(
+                "Market Execution request intentionally omits price"
+            )
 
         # ---------------------------------------------------------
         # FINAL PRE-SEND CHECK
@@ -1528,7 +1557,8 @@ class MT5ExecutionService:
                 warnings=warnings,
                 errors=[
                     f"MT5 rejected the trade: "
-                    f"{retcode_description}"
+                    f"{retcode_description}",
+                    f"MT5 last_error={mt5.last_error()}",
                 ],
                 execution_sent=execution_sent,
                 message=(
