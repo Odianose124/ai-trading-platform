@@ -675,6 +675,48 @@ class MT5AccountWorker:
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.stop()
     # ------------------------------------------------------------------
+    # ORDER PREFLIGHT CHECK
+    # ------------------------------------------------------------------
+
+    def order_check(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Validate an MT5 order request without sending it.
+
+        Runs only inside the account-scoped worker process.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        if not isinstance(request, dict):
+            raise MT5WorkerError(
+                "MT5 order check request must be a dictionary."
+            )
+
+        result = mt5.order_check(request)
+
+        if result is None:
+            raise MT5WorkerError(
+                "MT5 order_check returned no result: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "retcode": getattr(result, "retcode", None),
+            "comment": getattr(result, "comment", None),
+            "balance": getattr(result, "balance", None),
+            "equity": getattr(result, "equity", None),
+            "margin": getattr(result, "margin", None),
+            "margin_free": getattr(result, "margin_free", None),
+            "margin_level": getattr(result, "margin_level", None),
+        }
+
+    # ------------------------------------------------------------------
     # ORDER EXECUTION
     # ------------------------------------------------------------------
 

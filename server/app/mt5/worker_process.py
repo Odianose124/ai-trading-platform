@@ -271,6 +271,39 @@ def _worker_process_entry(
                 )
                 continue
 
+            if action == "order_check":
+                request = command.get("request")
+
+                if not isinstance(request, dict):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The order check request must be an object."
+                            ),
+                        }
+                    )
+                    continue
+
+                try:
+                    result = worker.order_check(request)
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "order_check_result",
+                        "result": result,
+                    }
+                )
+                continue
+
             if action == "execute_order":
                 request = command.get("request")
 
