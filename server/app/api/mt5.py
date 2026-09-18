@@ -1,4 +1,4 @@
-﻿from fastapi import (
+from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
@@ -348,6 +348,45 @@ def get_mt5_positions(
             detail=str(exc),
         ) from exc
 
+
+# ----------------------------------------------------------------------
+# PENDING ORDERS
+# ----------------------------------------------------------------------
+
+
+@router.get(
+    "/pending-orders",
+)
+def get_mt5_pending_orders(
+    symbol: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    account = require_registered_mt5_account(
+        db=db,
+        current_user=current_user,
+    )
+
+    try:
+        pending_orders = mt5_worker_manager.get_pending_orders(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+            symbol=symbol,
+        )
+
+        return {
+            "mt5_account_id": account.id,
+            "user_id": current_user.id,
+            "pending_orders": pending_orders,
+            "count": len(pending_orders),
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 # ----------------------------------------------------------------------
 # POSITION SUMMARY

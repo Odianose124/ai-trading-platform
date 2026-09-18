@@ -296,6 +296,96 @@ class MT5AccountWorker:
 
         return result
 
+    def get_pending_orders(
+        self,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Read platform-owned pending orders from this account's MT5 session.
+
+        This method runs only inside the account's dedicated worker
+        process. It never initializes MT5 and never sends an order.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        orders = mt5.orders_get()
+
+        if orders is None:
+            error = mt5.last_error()
+
+            raise MT5WorkerError(
+                "Unable to read MT5 pending orders: "
+                f"{error}"
+            )
+
+        normalized_symbol = (
+            symbol.strip().upper()
+            if symbol
+            else None
+        )
+
+        pending_types = {
+            mt5.ORDER_TYPE_BUY_LIMIT: "buy_limit",
+            mt5.ORDER_TYPE_SELL_LIMIT: "sell_limit",
+            mt5.ORDER_TYPE_BUY_STOP: "buy_stop",
+            mt5.ORDER_TYPE_SELL_STOP: "sell_stop",
+        }
+
+        result: list[dict[str, Any]] = []
+
+        for order in orders:
+            if order.magic != self.MAGIC_NUMBER:
+                continue
+
+            order_type = pending_types.get(order.type)
+
+            if order_type is None:
+                continue
+
+            if (
+                normalized_symbol
+                and str(order.symbol).upper()
+                != normalized_symbol
+            ):
+                continue
+
+            result.append(
+                {
+                    "ticket": int(order.ticket),
+                    "symbol": str(order.symbol),
+                    "type": order_type,
+                    "volume": float(order.volume_current),
+                    "price": float(order.price_open),
+                    "sl": float(order.sl),
+                    "tp": float(order.tp),
+                    "magic": int(order.magic),
+                    "time_setup": (
+                        int(order.time_setup)
+                        if order.time_setup
+                        else None
+                    ),
+                    "time_setup_msc": (
+                        int(order.time_setup_msc)
+                        if order.time_setup_msc
+                        else None
+                    ),
+                    "time_expiration": (
+                        int(order.time_expiration)
+                        if order.time_expiration
+                        else None
+                    ),
+                    "type_time": int(order.type_time),
+                    "type_filling": int(order.type_filling),
+                    "state": int(order.state),
+                    "comment": str(order.comment),
+                }
+            )
+
+        return result
     def get_position(
         self,
         ticket: int,

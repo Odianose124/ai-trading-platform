@@ -328,6 +328,51 @@ class MT5WorkerManager:
                     f"Unable to read MT5 deal history for account "
                     f"{mt5_account_id}: {exc}"
                 ) from exc
+    def get_pending_orders(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Return pending orders from one user's isolated MT5 worker.
+        """
+
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(
+                mt5_account_id
+            )
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.get_pending_orders(
+                    symbol
+                )
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read MT5 pending orders "
+                    f"for account {mt5_account_id}: {exc}"
+                ) from exc
+
     def stop_account(
         self,
         mt5_account_id: int,

@@ -195,6 +195,45 @@ def _worker_process_entry(
                     }
                 )
                 continue
+            if action == "get_pending_orders":
+                symbol = command.get("symbol")
+
+                if (
+                    symbol is not None
+                    and not isinstance(symbol, str)
+                ):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The pending-order symbol must be "
+                                "a string or null."
+                            ),
+                        }
+                    )
+                    continue
+
+                try:
+                    result = worker.get_pending_orders(
+                        symbol
+                    )
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "pending_orders",
+                        "pending_orders": result,
+                    }
+                )
+                continue
+
             if action == "validate_trade":
                 symbol = command.get("symbol")
                 direction = command.get("direction")
@@ -553,6 +592,64 @@ class MT5WorkerProcess:
                     "MT5 worker returned an invalid positions payload."
                 )
             return positions
+    def get_pending_orders(
+        self,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Request account-scoped pending orders from the dedicated worker.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            normalized_symbol = (
+                symbol.strip().upper()
+                if symbol
+                else None
+            )
+
+            self._send_command(
+                {
+                    "action": "get_pending_orders",
+                    "symbol": normalized_symbol,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 pending-order request failed.",
+                    )
+                )
+
+            if response.get("type") != "pending_orders":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "pending-order response."
+                )
+
+            pending_orders = response.get(
+                "pending_orders",
+                [],
+            )
+
+            if not isinstance(
+                pending_orders,
+                list,
+            ):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned invalid pending-order data."
+                )
+
+            return pending_orders
+
     def get_position(
         self,
         ticket: int,
