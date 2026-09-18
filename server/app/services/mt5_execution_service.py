@@ -1374,7 +1374,17 @@ class MT5ExecutionService:
         # order_check() validates the exact request with the broker
         # without sending the trade.
         logger.warning("MT5 PREFLIGHT REQUEST symbol=%s action=%s type=%s volume=%s price=%s sl=%s tp=%s filling=%s execution_mode=%s trade_exemode=%s", broker_symbol, request.get("action"), request.get("type"), request.get("volume"), request.get("price"), request.get("sl"), request.get("tp"), request.get("type_filling"), execution_mode, trade_exemode)
-        preflight = mt5.order_check(request)
+        try:
+            preflight = mt5_worker_manager.order_check(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
+                request=request,
+            )
+
+        except MT5WorkerManagerError as exc:
+            raise MT5ExecutionError(
+                f"MT5 worker preflight failed: {exc}"
+            ) from exc
         logger.warning("MT5 PREFLIGHT RESULT retcode=%s comment=%s last_error=%s", getattr(preflight, "retcode", None) if preflight is not None else None, getattr(preflight, "comment", None) if preflight is not None else None, mt5.last_error())
 
         if preflight is None:
@@ -1733,8 +1743,4 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
-
-
-
-
 
