@@ -267,7 +267,11 @@ class MT5ExecutionService:
         volume: Decimal,
     ) -> Optional[Decimal]:
 
-        symbol_info = mt5.symbol_info(broker_symbol)
+        symbol_info = mt5_worker_manager.symbol_info(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
+                symbol=broker_symbol,
+            )
 
         if symbol_info is None:
             return None
@@ -632,8 +636,10 @@ class MT5ExecutionService:
         # GET A SECOND FRESH TICK
         # ---------------------------------------------------------
 
-        symbol_info = mt5.symbol_info(
-            broker_symbol
+        symbol_info = mt5_worker_manager.symbol_info(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            symbol=broker_symbol,
         )
 
         if symbol_info is None:
@@ -660,8 +666,10 @@ class MT5ExecutionService:
                 ),
             )
 
-        tick = mt5.symbol_info_tick(
-            broker_symbol
+        tick = mt5_worker_manager.symbol_info_tick(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            symbol=broker_symbol,
         )
 
         if tick is None:
@@ -876,7 +884,10 @@ class MT5ExecutionService:
         # REFRESH ACCOUNT INFORMATION
         # ---------------------------------------------------------
 
-        account_info = mt5.account_info()
+        account_info = mt5_worker_manager.account_info(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
+            )
 
         if account_info is None:
             return MT5ExecutionResult(
@@ -991,13 +1002,21 @@ class MT5ExecutionService:
             margin_order_type = order_type
             margin_price = execution_price
 
+        margin_result = mt5_worker_manager.order_calc_margin(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            request={
+                "order_type": margin_order_type,
+                "symbol": broker_symbol,
+                "volume": float(requested_volume),
+                "price": float(margin_price),
+            },
+        )
+
         margin_required_raw = (
-            mt5.order_calc_margin(
-                margin_order_type,
-                broker_symbol,
-                float(requested_volume),
-                float(margin_price),
-            )
+            margin_result.get("margin")
+            if isinstance(margin_result, dict)
+            else None
         )
 
         margin_required = (
@@ -1247,8 +1266,10 @@ class MT5ExecutionService:
         # FINAL PRE-SEND CHECK
         # ---------------------------------------------------------
 
-        final_tick = mt5.symbol_info_tick(
-            broker_symbol
+        final_tick = mt5_worker_manager.symbol_info_tick(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            symbol=broker_symbol,
         )
 
         if final_tick is None:
@@ -1385,7 +1406,10 @@ class MT5ExecutionService:
             raise MT5ExecutionError(
                 f"MT5 worker preflight failed: {exc}"
             ) from exc
-        logger.warning("MT5 PREFLIGHT RESULT retcode=%s comment=%s last_error=%s", getattr(preflight, "retcode", None) if preflight is not None else None, getattr(preflight, "comment", None) if preflight is not None else None, mt5.last_error())
+        logger.warning(
+            "MT5 PREFLIGHT RESULT %s",
+            preflight,
+        )
 
         if preflight is None:
             return MT5ExecutionResult(
@@ -1406,8 +1430,8 @@ class MT5ExecutionService:
                 checks=checks,
                 warnings=warnings,
                 errors=[
-                    "MT5 order_check returned no result: "
-                    f"{mt5.last_error()}"
+                    "MT5 order_check returned no result "
+                    "from worker process."
                 ],
                 execution_sent=False,
                 message=(
@@ -1511,9 +1535,6 @@ class MT5ExecutionService:
             result = worker_result
 
         if result is None:
-            error_code, error_message = (
-                mt5.last_error()
-            )
 
             return MT5ExecutionResult(
                 approved=False,
@@ -1653,7 +1674,7 @@ class MT5ExecutionService:
                 errors=[
                     f"MT5 rejected the trade: "
                     f"{retcode_description}",
-                    f"MT5 last_error={mt5.last_error()}",
+                    "MT5 worker returned broker rejection details.",
                 ],
                 execution_sent=execution_sent,
                 message=(
@@ -1743,4 +1764,3 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
-

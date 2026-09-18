@@ -674,6 +674,120 @@ class MT5AccountWorker:
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.stop()
+
+    # ------------------------------------------------------------------
+    # BROKER INFORMATION HELPERS
+    # ------------------------------------------------------------------
+
+    def symbol_info(
+        self,
+        symbol: str,
+    ) -> dict[str, Any]:
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        info = mt5.symbol_info(symbol)
+
+        if info is None:
+            raise MT5WorkerError(
+                "Unable to read symbol information: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "name": info.name,
+            "visible": info.visible,
+            "digits": info.digits,
+            "point": info.point,
+            "trade_tick_size": info.trade_tick_size,
+            "trade_tick_value": info.trade_tick_value,
+            "volume_min": info.volume_min,
+            "volume_max": info.volume_max,
+            "volume_step": info.volume_step,
+        }
+
+    def symbol_info_tick(
+        self,
+        symbol: str,
+    ) -> dict[str, Any]:
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        tick = mt5.symbol_info_tick(symbol)
+
+        if tick is None:
+            raise MT5WorkerError(
+                "Unable to read tick information: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "bid": tick.bid,
+            "ask": tick.ask,
+            "last": tick.last,
+            "time": tick.time,
+        }
+
+    def account_info(
+        self,
+    ) -> dict[str, Any]:
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        account = mt5.account_info()
+
+        if account is None:
+            raise MT5WorkerError(
+                "Unable to read account information: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "login": account.login,
+            "server": account.server,
+            "balance": account.balance,
+            "equity": account.equity,
+            "margin": account.margin,
+            "margin_free": account.margin_free,
+            "margin_level": account.margin_level,
+        }
+
+    def order_calc_margin(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        result = mt5.order_calc_margin(
+            request["order_type"],
+            request["symbol"],
+            request["volume"],
+            request["price"],
+        )
+
+        if result is None:
+            raise MT5WorkerError(
+                "Unable to calculate margin: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "margin": result,
+        }
+
     # ------------------------------------------------------------------
     # ORDER PREFLIGHT CHECK
     # ------------------------------------------------------------------
