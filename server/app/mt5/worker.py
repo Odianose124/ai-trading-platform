@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import subprocess
@@ -303,8 +303,8 @@ class MT5AccountWorker:
         """
         Read platform-owned pending orders from this account's MT5 session.
 
-        This method runs only inside the account's dedicated worker
-        process. It never initializes MT5 and never sends an order.
+        The current market price is read from the same account-scoped
+        MT5 worker so pending-order data remains isolated per account.
         """
 
         if not self.status().connected:
@@ -346,20 +346,43 @@ class MT5AccountWorker:
             if order_type is None:
                 continue
 
+            order_symbol = str(order.symbol)
+
             if (
                 normalized_symbol
-                and str(order.symbol).upper()
+                and order_symbol.upper()
                 != normalized_symbol
             ):
                 continue
 
+            tick = mt5.symbol_info_tick(order_symbol)
+
+            if tick is None:
+                error = mt5.last_error()
+
+                raise MT5WorkerError(
+                    "Unable to read current market price for "
+                    f"{order_symbol}: {error}"
+                )
+
+            if order_type in {
+                "buy_limit",
+                "buy_stop",
+            }:
+                current_price = float(tick.ask)
+            else:
+                current_price = float(tick.bid)
+
             result.append(
                 {
                     "ticket": int(order.ticket),
-                    "symbol": str(order.symbol),
+                    "symbol": order_symbol,
                     "type": order_type,
                     "volume": float(order.volume_current),
                     "price": float(order.price_open),
+                    "current_price": current_price,
+                    "bid": float(tick.bid),
+                    "ask": float(tick.ask),
                     "sl": float(order.sl),
                     "tp": float(order.tp),
                     "magic": int(order.magic),
@@ -386,6 +409,7 @@ class MT5AccountWorker:
             )
 
         return result
+
     def get_position(
         self,
         ticket: int,
