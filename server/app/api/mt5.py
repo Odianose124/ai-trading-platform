@@ -23,6 +23,23 @@ router = APIRouter(
 )
 
 
+class PendingOrderModifyRequest(BaseModel):
+    price: float | None = Field(
+        default=None,
+        gt=0,
+    )
+
+    stop_loss: float | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    take_profit: float | None = Field(
+        default=None,
+        ge=0,
+    )
+
+
 class MT5TradingAccountRequest(BaseModel):
     login: int = Field(
         gt=0,
@@ -387,6 +404,101 @@ def get_mt5_pending_orders(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+
+# ----------------------------------------------------------------------
+# CANCEL PENDING ORDER
+# ----------------------------------------------------------------------
+
+
+@router.delete(
+    "/pending-orders/{ticket}",
+)
+def cancel_mt5_pending_order(
+    ticket: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    account = require_registered_mt5_account(
+        db=db,
+        current_user=current_user,
+    )
+
+    try:
+        result = mt5_worker_manager.cancel_pending_order(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+            ticket=ticket,
+        )
+
+        return {
+            "mt5_account_id": account.id,
+            "user_id": current_user.id,
+            "ticket": ticket,
+            "result": result,
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+# ----------------------------------------------------------------------
+# MODIFY PENDING ORDER
+# ----------------------------------------------------------------------
+
+
+@router.patch(
+    "/pending-orders/{ticket}",
+)
+def modify_mt5_pending_order(
+    ticket: int,
+    payload: PendingOrderModifyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if (
+        payload.price is None
+        and payload.stop_loss is None
+        and payload.take_profit is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "At least one pending-order field must be "
+                "provided for modification."
+            ),
+        )
+
+    account = require_registered_mt5_account(
+        db=db,
+        current_user=current_user,
+    )
+
+    try:
+        result = mt5_worker_manager.modify_pending_order(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+            ticket=ticket,
+            price=payload.price,
+            stop_loss=payload.stop_loss,
+            take_profit=payload.take_profit,
+        )
+
+        return {
+            "mt5_account_id": account.id,
+            "user_id": current_user.id,
+            "ticket": ticket,
+            "result": result,
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
 
 # ----------------------------------------------------------------------
 # POSITION SUMMARY

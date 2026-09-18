@@ -234,6 +234,88 @@ def _worker_process_entry(
                 )
                 continue
 
+            if action == "cancel_pending_order":
+                ticket = command.get("ticket")
+
+                try:
+                    ticket = int(ticket)
+                except (TypeError, ValueError):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The pending-order ticket must "
+                                "be an integer."
+                            ),
+                        }
+                    )
+                    continue
+
+                try:
+                    result = worker.cancel_pending_order(
+                        ticket
+                    )
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "pending_order_cancel_result",
+                        "result": result,
+                    }
+                )
+                continue
+
+            if action == "modify_pending_order":
+                ticket = command.get("ticket")
+                price = command.get("price")
+                stop_loss = command.get("stop_loss")
+                take_profit = command.get("take_profit")
+
+                try:
+                    ticket = int(ticket)
+                except (TypeError, ValueError):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The pending-order ticket must "
+                                "be an integer."
+                            ),
+                        }
+                    )
+                    continue
+
+                try:
+                    result = worker.modify_pending_order(
+                        ticket=ticket,
+                        price=price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                    )
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "pending_order_modify_result",
+                        "result": result,
+                    }
+                )
+                continue
+
             if action == "validate_trade":
                 symbol = command.get("symbol")
                 direction = command.get("direction")
@@ -649,6 +731,118 @@ class MT5WorkerProcess:
                 )
 
             return pending_orders
+
+    def cancel_pending_order(
+        self,
+        ticket: int,
+    ) -> dict[str, Any]:
+        """
+        Request cancellation of one account-scoped pending order.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            try:
+                normalized_ticket = int(ticket)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "Pending-order ticket must be an integer."
+                ) from exc
+
+            self._send_command(
+                {
+                    "action": "cancel_pending_order",
+                    "ticket": normalized_ticket,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 pending-order cancellation failed.",
+                    )
+                )
+
+            if response.get("type") != "pending_order_cancel_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "pending-order cancellation response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "pending-order cancellation result."
+                )
+
+            return result
+
+    def modify_pending_order(
+        self,
+        ticket: int,
+        price: Any = None,
+        stop_loss: Any = None,
+        take_profit: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Request modification of one account-scoped pending order.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            try:
+                normalized_ticket = int(ticket)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "Pending-order ticket must be an integer."
+                ) from exc
+
+            self._send_command(
+                {
+                    "action": "modify_pending_order",
+                    "ticket": normalized_ticket,
+                    "price": price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 pending-order modification failed.",
+                    )
+                )
+
+            if response.get("type") != "pending_order_modify_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "pending-order modification response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "pending-order modification result."
+                )
+
+            return result
 
     def get_position(
         self,

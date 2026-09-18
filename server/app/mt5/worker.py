@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import subprocess
@@ -409,6 +409,238 @@ class MT5AccountWorker:
             )
 
         return result
+
+    def cancel_pending_order(
+        self,
+        ticket: int,
+    ) -> dict[str, Any]:
+        """
+        Cancel one platform-owned pending order through this
+        account's isolated MT5 session.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        try:
+            normalized_ticket = int(ticket)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Pending-order ticket must be an integer."
+            ) from exc
+
+        orders = mt5.orders_get(
+            ticket=normalized_ticket,
+        )
+
+        if orders is None:
+            raise MT5WorkerError(
+                "Unable to read MT5 pending order: "
+                f"{mt5.last_error()}"
+            )
+
+        if not orders:
+            raise MT5WorkerError(
+                f"Pending order {normalized_ticket} was not found."
+            )
+
+        order = orders[0]
+
+        if order.magic != self.MAGIC_NUMBER:
+            raise MT5WorkerError(
+                "The pending order does not belong to this platform."
+            )
+
+        pending_types = {
+            mt5.ORDER_TYPE_BUY_LIMIT,
+            mt5.ORDER_TYPE_SELL_LIMIT,
+            mt5.ORDER_TYPE_BUY_STOP,
+            mt5.ORDER_TYPE_SELL_STOP,
+        }
+
+        if order.type not in pending_types:
+            raise MT5WorkerError(
+                "The specified ticket is not a pending order."
+            )
+
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": normalized_ticket,
+        }
+
+        result = mt5.order_send(request)
+
+        if result is None:
+            raise MT5WorkerError(
+                "MT5 pending-order cancellation returned no result: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "retcode": getattr(result, "retcode", None),
+            "comment": getattr(result, "comment", None),
+            "request_id": getattr(result, "request_id", None),
+            "order": getattr(result, "order", None),
+            "deal": getattr(result, "deal", None),
+            "volume": getattr(result, "volume", None),
+            "price": getattr(result, "price", None),
+            "bid": getattr(result, "bid", None),
+            "ask": getattr(result, "ask", None),
+            "retcode_external": getattr(
+                result,
+                "retcode_external",
+                None,
+            ),
+            "last_error": mt5.last_error(),
+        }
+
+    def modify_pending_order(
+        self,
+        ticket: int,
+        price: Any = None,
+        stop_loss: Any = None,
+        take_profit: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Modify one platform-owned pending order through this account's
+        isolated MT5 session.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        try:
+            normalized_ticket = int(ticket)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Pending-order ticket must be an integer."
+            ) from exc
+
+        orders = mt5.orders_get(
+            ticket=normalized_ticket,
+        )
+
+        if orders is None:
+            raise MT5WorkerError(
+                "Unable to read MT5 pending order: "
+                f"{mt5.last_error()}"
+            )
+
+        if not orders:
+            raise MT5WorkerError(
+                f"Pending order {normalized_ticket} was not found."
+            )
+
+        order = orders[0]
+
+        if order.magic != self.MAGIC_NUMBER:
+            raise MT5WorkerError(
+                "The pending order does not belong to this platform."
+            )
+
+        pending_types = {
+            mt5.ORDER_TYPE_BUY_LIMIT,
+            mt5.ORDER_TYPE_SELL_LIMIT,
+            mt5.ORDER_TYPE_BUY_STOP,
+            mt5.ORDER_TYPE_SELL_STOP,
+        }
+
+        if order.type not in pending_types:
+            raise MT5WorkerError(
+                "The specified ticket is not a pending order."
+            )
+
+        try:
+            final_price = (
+                float(price)
+                if price is not None
+                else float(order.price_open)
+            )
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "Pending-order price must be numeric."
+            ) from exc
+
+        if final_price <= 0:
+            raise MT5WorkerError(
+                "Pending-order price must be greater than zero."
+            )
+
+        def normalize_stop(value, existing):
+            if value is None:
+                return float(existing)
+
+            try:
+                normalized = float(value)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerError(
+                    "Pending-order stop-loss/take-profit "
+                    "values must be numeric."
+                ) from exc
+
+            if normalized < 0:
+                raise MT5WorkerError(
+                    "Pending-order stop-loss/take-profit "
+                    "values cannot be negative."
+                )
+
+            return normalized
+
+        final_stop_loss = normalize_stop(
+            stop_loss,
+            order.sl,
+        )
+
+        final_take_profit = normalize_stop(
+            take_profit,
+            order.tp,
+        )
+
+        request = {
+            "action": mt5.TRADE_ACTION_MODIFY,
+            "order": normalized_ticket,
+            "symbol": str(order.symbol),
+            "price": final_price,
+            "sl": final_stop_loss,
+            "tp": final_take_profit,
+            "type_time": int(order.type_time),
+            "type_filling": int(order.type_filling),
+        }
+
+        if getattr(order, "time_expiration", 0):
+            request["expiration"] = int(
+                order.time_expiration
+            )
+
+        result = mt5.order_send(request)
+
+        if result is None:
+            raise MT5WorkerError(
+                "MT5 pending-order modification returned no result: "
+                f"{mt5.last_error()}"
+            )
+
+        return {
+            "retcode": getattr(result, "retcode", None),
+            "comment": getattr(result, "comment", None),
+            "request_id": getattr(result, "request_id", None),
+            "order": getattr(result, "order", None),
+            "deal": getattr(result, "deal", None),
+            "volume": getattr(result, "volume", None),
+            "price": getattr(result, "price", None),
+            "bid": getattr(result, "bid", None),
+            "ask": getattr(result, "ask", None),
+            "retcode_external": getattr(
+                result,
+                "retcode_external",
+                None,
+            ),
+            "last_error": mt5.last_error(),
+        }
 
     def get_position(
         self,
