@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -357,6 +359,48 @@ def get_mt5_positions(
             "user_id": current_user.id,
             "positions": positions,
             "count": len(positions),
+        }
+
+    except MT5WorkerManagerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+# ----------------------------------------------------------------------
+# ORDER HISTORY
+# ----------------------------------------------------------------------
+
+
+@router.get(
+    "/order-history",
+)
+def get_mt5_order_history(
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    symbol: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    account = require_registered_mt5_account(
+        db=db,
+        current_user=current_user,
+    )
+
+    try:
+        history = mt5_worker_manager.get_order_history(
+            mt5_account_id=account.id,
+            user_id=current_user.id,
+            date_from=date_from,
+            date_to=date_to,
+            symbol=symbol,
+        )
+
+        return {
+            "mt5_account_id": account.id,
+            "user_id": current_user.id,
+            **history,
         }
 
     except MT5WorkerManagerError as exc:

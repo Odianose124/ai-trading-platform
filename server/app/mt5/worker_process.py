@@ -195,6 +195,79 @@ def _worker_process_entry(
                     }
                 )
                 continue
+            if action == "get_order_history":
+                date_from = command.get("date_from")
+                date_to = command.get("date_to")
+                symbol = command.get("symbol")
+
+                if date_from is not None and not isinstance(
+                    date_from,
+                    datetime,
+                ):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The history start time must "
+                                "be a datetime."
+                            ),
+                        }
+                    )
+                    continue
+
+                if date_to is not None and not isinstance(
+                    date_to,
+                    datetime,
+                ):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The history end time must "
+                                "be a datetime."
+                            ),
+                        }
+                    )
+                    continue
+
+                if symbol is not None and not isinstance(
+                    symbol,
+                    str,
+                ):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The history symbol must "
+                                "be a string or null."
+                            ),
+                        }
+                    )
+                    continue
+
+                try:
+                    result = worker.get_order_history(
+                        date_from=date_from,
+                        date_to=date_to,
+                        symbol=symbol,
+                    )
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "order_history",
+                        "history": result,
+                    }
+                )
+                continue
+
             if action == "get_pending_orders":
                 symbol = command.get("symbol")
 
@@ -674,6 +747,62 @@ class MT5WorkerProcess:
                     "MT5 worker returned an invalid positions payload."
                 )
             return positions
+    def get_order_history(
+        self,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Request account-scoped MT5 order/deal history.
+        """
+
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            normalized_symbol = (
+                symbol.strip().upper()
+                if symbol
+                else None
+            )
+
+            self._send_command(
+                {
+                    "action": "get_order_history",
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "symbol": normalized_symbol,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 order-history request failed.",
+                    )
+                )
+
+            if response.get("type") != "order_history":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "order-history response."
+                )
+
+            history = response.get("history")
+
+            if not isinstance(history, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned invalid order-history data."
+                )
+
+            return history
+
     def get_pending_orders(
         self,
         symbol: str | None = None,

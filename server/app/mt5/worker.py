@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from threading import Event, RLock
 from typing import Any
@@ -608,7 +609,6 @@ class MT5AccountWorker:
             "sl": final_stop_loss,
             "tp": final_take_profit,
             "type_time": int(order.type_time),
-            "type_filling": int(order.type_filling),
         }
 
         if getattr(order, "time_expiration", 0):
@@ -755,6 +755,334 @@ class MT5AccountWorker:
     # ------------------------------------------------------------------
     # HISTORY
     # ------------------------------------------------------------------
+
+    def get_order_history(
+        self,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Read platform-owned MT5 order and deal history for this account.
+
+        Historical orders expose placement/execution/cancellation state,
+        while historical deals expose actual trade executions and their
+        realized profit/loss. Both are filtered by this platform's magic
+        number inside the isolated account worker.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        final_date_to = date_to or datetime.now(timezone.utc)
+        final_date_from = date_from or (
+            final_date_to - timedelta(days=30)
+        )
+
+        if final_date_from.tzinfo is None:
+            final_date_from = final_date_from.replace(
+                tzinfo=timezone.utc
+            )
+
+        if final_date_to.tzinfo is None:
+            final_date_to = final_date_to.replace(
+                tzinfo=timezone.utc
+            )
+
+        if final_date_from > final_date_to:
+            raise MT5WorkerError(
+                "History start time cannot be later than end time."
+            )
+
+        normalized_symbol = (
+            symbol.strip().upper()
+            if symbol
+            else None
+        )
+
+        orders = mt5.history_orders_get(
+            final_date_from,
+            final_date_to,
+        )
+
+        if orders is None:
+            raise MT5WorkerError(
+                "Unable to read MT5 order history: "
+                f"{mt5.last_error()}"
+            )
+
+        deals = mt5.history_deals_get(
+            final_date_from,
+            final_date_to,
+        )
+
+        if deals is None:
+            raise MT5WorkerError(
+                "Unable to read MT5 deal history: "
+                f"{mt5.last_error()}"
+            )
+
+        order_types = {
+            mt5.ORDER_TYPE_BUY: "buy",
+            mt5.ORDER_TYPE_SELL: "sell",
+            mt5.ORDER_TYPE_BUY_LIMIT: "buy_limit",
+            mt5.ORDER_TYPE_SELL_LIMIT: "sell_limit",
+            mt5.ORDER_TYPE_BUY_STOP: "buy_stop",
+            mt5.ORDER_TYPE_SELL_STOP: "sell_stop",
+            mt5.ORDER_TYPE_BUY_STOP_LIMIT: "buy_stop_limit",
+            mt5.ORDER_TYPE_SELL_STOP_LIMIT: "sell_stop_limit",
+            mt5.ORDER_TYPE_CLOSE_BY: "close_by",
+        }
+
+        order_states = {
+            mt5.ORDER_STATE_STARTED: "started",
+            mt5.ORDER_STATE_PLACED: "placed",
+            mt5.ORDER_STATE_CANCELED: "canceled",
+            mt5.ORDER_STATE_PARTIAL: "partial",
+            mt5.ORDER_STATE_FILLED: "filled",
+            mt5.ORDER_STATE_REJECTED: "rejected",
+            mt5.ORDER_STATE_EXPIRED: "expired",
+            mt5.ORDER_STATE_REQUEST_ADD: "request_add",
+            mt5.ORDER_STATE_REQUEST_MODIFY: "request_modify",
+            mt5.ORDER_STATE_REQUEST_CANCEL: "request_cancel",
+        }
+
+        deal_types = {
+            mt5.DEAL_TYPE_BUY: "buy",
+            mt5.DEAL_TYPE_SELL: "sell",
+        }
+
+        deal_entries = {
+            mt5.DEAL_ENTRY_IN: "in",
+            mt5.DEAL_ENTRY_OUT: "out",
+            mt5.DEAL_ENTRY_INOUT: "inout",
+            mt5.DEAL_ENTRY_OUT_BY: "out_by",
+        }
+
+        history_orders: list[dict[str, Any]] = []
+        history_deals: list[dict[str, Any]] = []
+
+        for order in orders:
+            if int(getattr(order, "magic", 0)) != self.MAGIC_NUMBER:
+                continue
+
+            order_symbol = str(getattr(order, "symbol", ""))
+
+            if (
+                normalized_symbol
+                and order_symbol.upper() != normalized_symbol
+            ):
+                continue
+
+            order_type_value = int(getattr(order, "type", 0))
+            state_value = int(getattr(order, "state", 0))
+
+            history_orders.append(
+                {
+                    "ticket": int(order.ticket),
+                    "position_id": int(
+                        getattr(order, "position_id", 0)
+                    ),
+                    "position_by_id": int(
+                        getattr(order, "position_by_id", 0)
+                    ),
+                    "symbol": order_symbol,
+                    "type": order_types.get(
+                        order_type_value,
+                        str(order_type_value),
+                    ),
+                    "state": order_states.get(
+                        state_value,
+                        str(state_value),
+                    ),
+                    "volume_initial": float(
+                        getattr(order, "volume_initial", 0)
+                    ),
+                    "volume_current": float(
+                        getattr(order, "volume_current", 0)
+                    ),
+                    "price_open": float(
+                        getattr(order, "price_open", 0)
+                    ),
+                    "price_current": float(
+                        getattr(order, "price_current", 0)
+                    ),
+                    "stop_loss": float(
+                        getattr(order, "sl", 0)
+                    ),
+                    "take_profit": float(
+                        getattr(order, "tp", 0)
+                    ),
+                    "price_stop_limit": float(
+                        getattr(order, "price_stoplimit", 0)
+                    ),
+                    "time_setup": (
+                        int(order.time_setup)
+                        if getattr(order, "time_setup", 0)
+                        else None
+                    ),
+                    "time_setup_msc": (
+                        int(order.time_setup_msc)
+                        if getattr(order, "time_setup_msc", 0)
+                        else None
+                    ),
+                    "time_done": (
+                        int(order.time_done)
+                        if getattr(order, "time_done", 0)
+                        else None
+                    ),
+                    "time_done_msc": (
+                        int(order.time_done_msc)
+                        if getattr(order, "time_done_msc", 0)
+                        else None
+                    ),
+                    "time_expiration": (
+                        int(order.time_expiration)
+                        if getattr(order, "time_expiration", 0)
+                        else None
+                    ),
+                    "type_time": int(
+                        getattr(order, "type_time", 0)
+                    ),
+                    "type_filling": int(
+                        getattr(order, "type_filling", 0)
+                    ),
+                    "reason": int(
+                        getattr(order, "reason", 0)
+                    ),
+                    "magic": int(
+                        getattr(order, "magic", 0)
+                    ),
+                    "comment": str(
+                        getattr(order, "comment", "")
+                    ),
+                    "external_id": str(
+                        getattr(order, "external_id", "")
+                    ),
+                }
+            )
+
+        for deal in deals:
+            if int(getattr(deal, "magic", 0)) != self.MAGIC_NUMBER:
+                continue
+
+            deal_symbol = str(
+                getattr(deal, "symbol", "")
+            )
+
+            if (
+                normalized_symbol
+                and deal_symbol.upper() != normalized_symbol
+            ):
+                continue
+
+            deal_type_value = int(
+                getattr(deal, "type", 0)
+            )
+            deal_entry_value = int(
+                getattr(deal, "entry", 0)
+            )
+
+            event_type = (
+                "position_closed"
+                if deal_entry_value in {
+                    mt5.DEAL_ENTRY_OUT,
+                    mt5.DEAL_ENTRY_OUT_BY,
+                }
+                else "trade_execution"
+            )
+
+            history_deals.append(
+                {
+                    "ticket": int(deal.ticket),
+                    "order_ticket": int(
+                        getattr(deal, "order", 0)
+                    ),
+                    "position_id": int(
+                        getattr(deal, "position_id", 0)
+                    ),
+                    "symbol": deal_symbol,
+                    "type": deal_types.get(
+                        deal_type_value,
+                        str(deal_type_value),
+                    ),
+                    "entry": deal_entries.get(
+                        deal_entry_value,
+                        str(deal_entry_value),
+                    ),
+                    "event_type": event_type,
+                    "volume": float(
+                        getattr(deal, "volume", 0)
+                    ),
+                    "price": float(
+                        getattr(deal, "price", 0)
+                    ),
+                    "profit": float(
+                        getattr(deal, "profit", 0)
+                    ),
+                    "commission": float(
+                        getattr(deal, "commission", 0)
+                    ),
+                    "swap": float(
+                        getattr(deal, "swap", 0)
+                    ),
+                    "fee": float(
+                        getattr(deal, "fee", 0)
+                    ),
+                    "time": (
+                        int(deal.time)
+                        if getattr(deal, "time", 0)
+                        else None
+                    ),
+                    "time_msc": (
+                        int(deal.time_msc)
+                        if getattr(deal, "time_msc", 0)
+                        else None
+                    ),
+                    "magic": int(
+                        getattr(deal, "magic", 0)
+                    ),
+                    "reason": int(
+                        getattr(deal, "reason", 0)
+                    ),
+                    "comment": str(
+                        getattr(deal, "comment", "")
+                    ),
+                    "external_id": str(
+                        getattr(deal, "external_id", "")
+                    ),
+                }
+            )
+
+        history_orders.sort(
+            key=lambda item: (
+                item.get("time_done")
+                or item.get("time_setup")
+                or 0
+            ),
+            reverse=True,
+        )
+
+        history_deals.sort(
+            key=lambda item: item.get("time") or 0,
+            reverse=True,
+        )
+
+        return {
+            "date_from": final_date_from.isoformat(),
+            "date_to": final_date_to.isoformat(),
+            "orders": history_orders,
+            "deals": history_deals,
+            "closed_positions": [
+                deal
+                for deal in history_deals
+                if deal["event_type"] == "position_closed"
+            ],
+            "count_orders": len(history_orders),
+            "count_deals": len(history_deals),
+        }
 
     def get_history_order_position_ids(
         self,
