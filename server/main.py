@@ -1,12 +1,27 @@
 ﻿from contextlib import asynccontextmanager
+import asyncio
+from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
 
-from app.mt5.worker_manager import mt5_worker_manager
 
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+
+from app.database.connection import SessionLocal
+from app.models.mt5_trading_account import MT5TradingAccount
+from app.models.user import User
+from app.mt5.worker_manager import (
+    MT5WorkerManagerError,
+    mt5_worker_manager,
+)
 from app.api.auth import router as auth_router
 from app.api.mt5 import router as mt5_router
 from app.api.mt5_market_data import router as mt5_market_data_router
@@ -124,6 +139,99 @@ from app.services.pending_order_monitor import (
     pending_order_monitor,
 )
 
+def build_mt5_realtime_snapshot(
+    mt5_account_id: int,
+    user_id: int,
+) -> dict:
+    """
+    Build one account-scoped realtime MT5 dashboard snapshot.
+
+    All broker data is obtained through the dedicated account worker.
+    """
+
+    status_data = mt5_worker_manager.status_for_account(
+        mt5_account_id=mt5_account_id,
+        user_id=user_id,
+    )
+
+    account = mt5_worker_manager.account_info(
+        mt5_account_id=mt5_account_id,
+        user_id=user_id,
+    )
+
+    positions = mt5_worker_manager.get_positions(
+        mt5_account_id=mt5_account_id,
+        user_id=user_id,
+    )
+
+    pending_orders = mt5_worker_manager.get_pending_orders(
+        mt5_account_id=mt5_account_id,
+        user_id=user_id,
+    )
+
+    total_volume = sum(
+        float(position.get("volume", 0) or 0)
+        for position in positions
+    )
+
+    total_profit = sum(
+        float(position.get("profit", 0) or 0)
+        for position in positions
+    )
+
+    buy_positions = sum(
+        1
+        for position in positions
+        if position.get("type") == "buy"
+    )
+
+    sell_positions = sum(
+        1
+        for position in positions
+        if position.get("type") == "sell"
+    )
+
+    symbols = {
+        str(position.get("symbol")).strip().upper()
+        for position in positions
+        if position.get("symbol")
+    }
+
+    symbols.update(
+        str(order.get("symbol")).strip().upper()
+        for order in pending_orders
+        if order.get("symbol")
+    )
+
+    ticks: dict[str, dict] = {}
+
+    for symbol in sorted(symbols):
+        tick = mt5_worker_manager.symbol_info_tick(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            symbol=symbol,
+        )
+
+        ticks[symbol] = tick
+
+    return {
+        "type": "mt5_snapshot",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mt5_account_id": mt5_account_id,
+        "user_id": user_id,
+        "connection": status_data,
+        "account": account,
+        "positions": positions,
+        "pending_orders": pending_orders,
+        "summary": {
+            "total_positions": len(positions),
+            "buy_positions": buy_positions,
+            "sell_positions": sell_positions,
+            "total_volume": total_volume,
+            "floating_profit": total_profit,
+        },
+        "ticks": ticks,
+    }
 
 MARKET_SYMBOLS = [
     "BTCUSD",
@@ -170,6 +278,121 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+@app.websocket("/ws/mt5")
+async def mt5_realtime_websocket(
+    websocket: WebSocket,
+    token: str | None = None,
+):
+    await websocket.accept()
+
+    if not token:
+        await websocket.send_json(
+            {
+                "type": "mt5_error",
+                "detail": "Authentication token is required.",
+            }
+        )
+        await websocket.close(code=1008)
+        return
+
+    db: Session | None = None
+
+    try:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM],
+            )
+
+            user_id_raw = payload.get("sub")
+
+            if user_id_raw is None:
+                raise ValueError("Missing user identity.")
+
+            user_id = int(user_id_raw)
+
+        except (JWTError, ValueError, TypeError):
+            await websocket.send_json(
+                {
+                    "type": "mt5_error",
+                    "detail": "Could not validate credentials.",
+                }
+            )
+            await websocket.close(code=1008)
+            return
+
+        db = SessionLocal()
+
+        user = (
+            db.query(User)
+            .filter(User.id == user_id)
+            .first()
+        )
+
+        if user is None or not user.is_active:
+            await websocket.send_json(
+                {
+                    "type": "mt5_error",
+                    "detail": "User account is inactive or unavailable.",
+                }
+            )
+            await websocket.close(code=1008)
+            return
+
+        account = (
+            db.query(MT5TradingAccount)
+            .filter(
+                MT5TradingAccount.user_id == user_id,
+                MT5TradingAccount.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if account is None:
+            await websocket.send_json(
+                {
+                    "type": "mt5_error",
+                    "detail": (
+                        "No active MT5 trading account is registered "
+                        "for this user."
+                    ),
+                }
+            )
+            await websocket.close(code=1008)
+            return
+
+        while True:
+            try:
+                snapshot = await asyncio.to_thread(
+                    build_mt5_realtime_snapshot,
+                    account.id,
+                    user_id,
+                )
+
+                await websocket.send_json(snapshot)
+
+            except MT5WorkerManagerError as exc:
+                await websocket.send_json(
+                    {
+                        "type": "mt5_snapshot_error",
+                        "timestamp": datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                        "mt5_account_id": account.id,
+                        "user_id": user_id,
+                        "detail": str(exc),
+                    }
+                )
+
+            await asyncio.sleep(1)
+
+    except WebSocketDisconnect:
+        pass
+
+    finally:
+        if db is not None:
+            db.close()
 
 app.add_middleware(
     CORSMiddleware,
