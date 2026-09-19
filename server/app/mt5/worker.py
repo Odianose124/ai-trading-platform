@@ -41,7 +41,11 @@ class MT5AccountWorker:
 
     MAGIC_NUMBER = 202609
 
-    def __init__(self, runtime: MT5AccountRuntime) -> None:
+    def __init__(
+        self,
+        runtime: MT5AccountRuntime,
+        password: str,
+    ) -> None:
         global mt5
 
         try:
@@ -53,6 +57,7 @@ class MT5AccountWorker:
             ) from exc
 
         self.runtime = runtime
+        self._password = password
         self._terminal_process: subprocess.Popen[bytes] | None = None
         self._connected = False
         self._lock = RLock()
@@ -142,14 +147,15 @@ class MT5AccountWorker:
         """
         Initialize MetaTrader 5 against this worker's terminal.
 
-        The password is intentionally omitted. The terminal is expected
-        to have its authorized credentials saved in its own terminal
-        runtime/database.
+        The password is supplied only for this connection attempt.
+        It is intentionally not stored in the database or runtime
+        identity. The worker process keeps it only in memory.
         """
 
         initialized = mt5.initialize(
             path=str(self.runtime.terminal_path),
             login=self.runtime.login,
+            password=self._password,
             server=self.runtime.server,
         )
 
@@ -1683,5 +1689,6 @@ class MT5AccountWorker:
             ),
             "last_error": mt5.last_error(),
         }
+
 
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import multiprocessing
 from datetime import datetime
 from multiprocessing.connection import Connection
@@ -11,12 +11,16 @@ class MT5WorkerProcessError(RuntimeError):
 def _worker_process_entry(
     runtime: MT5AccountRuntime,
     connection: Connection,
+    password: str,
 ) -> None:
     """
     Entry point executed inside the dedicated MT5 worker process.
     The MetaTrader5 Python module is loaded only inside this process.
     """
-    worker = MT5AccountWorker(runtime)
+    worker = MT5AccountWorker(
+        runtime,
+        password,
+    )
     try:
         worker.start()
         connection.send(
@@ -621,8 +625,10 @@ class MT5WorkerProcess:
     def __init__(
         self,
         runtime: MT5AccountRuntime,
+        password: str,
     ) -> None:
         self.runtime = runtime
+        self._password = password
         self._process: multiprocessing.Process | None = None
         self._connection: Connection | None = None
         self._lock = RLock()
@@ -642,6 +648,7 @@ class MT5WorkerProcess:
                 args=(
                     self.runtime,
                     child_connection,
+                    self._password,
                 ),
                 name=(
                     f"mt5-worker-"
@@ -1414,3 +1421,4 @@ def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:
     return MT5WorkerProcess(runtime)
+

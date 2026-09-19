@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 from fastapi import (
     APIRouter,
@@ -39,6 +39,13 @@ class PendingOrderModifyRequest(BaseModel):
     take_profit: float | None = Field(
         default=None,
         ge=0,
+    )
+
+
+class MT5ConnectRequest(BaseModel):
+    password: str = Field(
+        min_length=1,
+        max_length=255,
     )
 
 
@@ -217,6 +224,7 @@ def register_mt5_account(
     "/connect",
 )
 def connect_mt5(
+    payload: MT5ConnectRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -229,6 +237,7 @@ def connect_mt5(
     try:
         worker_status = mt5_worker_manager.start_account(
             account=account,
+            password=payload.password,
         )
 
         return {
@@ -611,3 +620,4 @@ def get_mt5_positions_summary(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+

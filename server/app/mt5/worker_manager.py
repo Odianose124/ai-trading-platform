@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from threading import RLock
@@ -26,6 +26,7 @@ class MT5WorkerManager:
     def start_account(
         self,
         account: MT5TradingAccount,
+        password: str,
     ) -> dict[str, Any]:
         if account.id is None:
             raise MT5WorkerManagerError(
@@ -34,6 +35,11 @@ class MT5WorkerManager:
         if account.user_id is None:
             raise MT5WorkerManagerError(
                 "MT5 trading account must belong to a user."
+            )
+
+        if not isinstance(password, str) or not password.strip():
+            raise MT5WorkerManagerError(
+                "MT5 account password is required to connect."
             )
         with self._lock:
             runtime = mt5_runtime_manager.register_account(account)
@@ -47,7 +53,10 @@ class MT5WorkerManager:
                 if existing.is_running():
                     return existing.status()
                 self._workers.pop(account.id, None)
-            worker = MT5WorkerProcess(runtime)
+            worker = MT5WorkerProcess(
+                runtime,
+                password,
+            )
             try:
                 status = worker.start()
             except (
@@ -755,3 +764,4 @@ class MT5WorkerManager:
                         account_id
                     )
 mt5_worker_manager = MT5WorkerManager()
+
