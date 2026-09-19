@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import subprocess
@@ -6,8 +6,6 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from threading import Event, RLock
 from typing import Any
-
-import MetaTrader5 as mt5
 
 from app.mt5.runtime import MT5AccountRuntime
 
@@ -44,6 +42,16 @@ class MT5AccountWorker:
     MAGIC_NUMBER = 202609
 
     def __init__(self, runtime: MT5AccountRuntime) -> None:
+        global mt5
+
+        try:
+            import MetaTrader5 as mt5
+        except ImportError as exc:
+            raise MT5WorkerError(
+                "The MetaTrader5 Python package is not available "
+                "inside the MT5 worker process."
+            ) from exc
+
         self.runtime = runtime
         self._terminal_process: subprocess.Popen[bytes] | None = None
         self._connected = False
@@ -1675,3 +1683,5 @@ class MT5AccountWorker:
             ),
             "last_error": mt5.last_error(),
         }
+
+
