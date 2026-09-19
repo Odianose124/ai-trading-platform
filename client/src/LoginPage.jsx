@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Bot, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "./services/api";
@@ -7,7 +7,7 @@ function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(location.state?.registeredEmail || "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -202,6 +202,18 @@ function LoginPage() {
               : "Sign in"}
           </button>
         </form>
+
+        <div style={styles.registerPrompt}>
+          <span>Don't have an account?</span>
+
+          <button
+            type="button"
+            onClick={() => navigate("/register")}
+            style={styles.registerLink}
+          >
+            Create account
+          </button>
+        </div>
 
         <div style={styles.securityNotice}>
           <ShieldCheck size={17} />
@@ -401,6 +413,26 @@ const styles = {
     cursor: "pointer",
     boxShadow:
       "0 12px 28px rgba(37, 99, 235, 0.25)",
+  },
+
+  registerPrompt: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: "6px",
+    marginTop: "22px",
+    color: "#64748b",
+    fontSize: "13px",
+  },
+
+  registerLink: {
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    color: "#60a5fa",
+    fontSize: "13px",
+    fontWeight: 700,
+    cursor: "pointer",
   },
 
   securityNotice: {
