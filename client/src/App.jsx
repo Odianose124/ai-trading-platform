@@ -1457,6 +1457,20 @@ function SettingsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+
+  const [mt5Account, setMt5Account] = useState(null);
+  const [mt5Loading, setMt5Loading] = useState(true);
+  const [mt5Connecting, setMt5Connecting] = useState(false);
+  const [mt5Message, setMt5Message] = useState("");
+  const [mt5Error, setMt5Error] = useState("");
+
+  const [mt5Form, setMt5Form] = useState({
+    login: "",
+    server: "",
+    password: "",
+    account_name: "",
+    currency: "USD",
+  });
   const loadSettings = async () => {
     try {
       setLoading(true);
@@ -1479,6 +1493,98 @@ function SettingsPage() {
     loadSettings();
   }, []);
 
+  const loadMt5Status = async () => {
+    try {
+      setMt5Loading(true);
+      setMt5Error("");
+
+      const response = await api.get("/api/mt5/status");
+      setMt5Account(response.data);
+    } catch (err) {
+      if (err?.response?.status === 404) {
+        setMt5Account(null);
+        setMt5Error("");
+      } else {
+        setMt5Error(
+          err?.response?.data?.detail ||
+            "Unable to load MT5 account status.",
+        );
+      }
+    } finally {
+      setMt5Loading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMt5Status();
+  }, []);
+
+  const updateMt5Field = (field, value) => {
+    setMt5Form((current) => ({
+      ...current,
+      [field]: value,
+    }));
+
+    setMt5Message("");
+    setMt5Error("");
+  };
+
+  const connectMt5 = async () => {
+    const login = Number(mt5Form.login);
+
+    if (!Number.isInteger(login) || login <= 0) {
+      setMt5Error("Enter a valid MT5 login number.");
+      return;
+    }
+
+    if (!mt5Form.server.trim()) {
+      setMt5Error("Enter your MT5 server.");
+      return;
+    }
+
+    if (!mt5Form.password) {
+      setMt5Error("Enter your MT5 password.");
+      return;
+    }
+
+    try {
+      setMt5Connecting(true);
+      setMt5Message("");
+      setMt5Error("");
+
+      await api.post("/api/mt5/account", {
+        login,
+        server: mt5Form.server.trim(),
+        account_name:
+          mt5Form.account_name.trim() || null,
+        currency:
+          mt5Form.currency.trim().toUpperCase() || "USD",
+      });
+
+      const response = await api.post("/api/mt5/connect", {
+        password: mt5Form.password,
+      });
+
+      setMt5Account(response.data);
+      setMt5Message(
+        "MetaTrader 5 connected successfully.",
+      );
+
+      setMt5Form((current) => ({
+        ...current,
+        password: "",
+      }));
+
+      await loadMt5Status();
+    } catch (err) {
+      setMt5Error(
+        err?.response?.data?.detail ||
+          "Unable to connect the MT5 account.",
+      );
+    } finally {
+      setMt5Connecting(false);
+    }
+  };
   const updateField = (field, value) => {
     setSettings((current) => ({
       ...current,
@@ -1644,6 +1750,162 @@ function SettingsPage() {
         </div>
       )}
 
+      <div className="analysis-panel mt5-settings-panel">
+        <div className="panel-heading">
+          <TrendingUp size={20} />
+
+          <div>
+            <h3>MetaTrader 5 connection</h3>
+            <span>
+              Connect your personal MT5 trading account securely.
+              Your password is used only for the connection attempt
+              and is not stored in your trading account record.
+            </span>
+          </div>
+        </div>
+
+        {mt5Message && (
+          <div className="settings-message success">
+            {mt5Message}
+          </div>
+        )}
+
+        {mt5Error && (
+          <div className="settings-message error">
+            {mt5Error}
+          </div>
+        )}
+
+        {mt5Loading ? (
+          <div className="reasoning-content">
+            <p>Checking your MT5 connection...</p>
+          </div>
+        ) : (
+          <div className="settings-form">
+            {mt5Account?.connected === true ? (
+              <div className="settings-safety-card">
+                <ShieldCheck size={18} />
+
+                <div>
+                  <strong>MT5 account connected</strong>
+                  <p>
+                    Login:{" "}
+                    {mt5Account?.account?.login ||
+                      mt5Account?.login ||
+                      "--"}
+                    {" · "}
+                    Server:{" "}
+                    {mt5Account?.account?.server ||
+                      mt5Account?.server ||
+                      "--"}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <label className="settings-field">
+                  <span>MT5 Login</span>
+
+                  <input
+                    type="number"
+                    min="1"
+                    value={mt5Form.login}
+                    onChange={(event) =>
+                      updateMt5Field(
+                        "login",
+                        event.target.value,
+                      )
+                    }
+                    placeholder="MT5 account number"
+                  />
+                </label>
+
+                <label className="settings-field">
+                  <span>MT5 Server</span>
+
+                  <input
+                    type="text"
+                    value={mt5Form.server}
+                    onChange={(event) =>
+                      updateMt5Field(
+                        "server",
+                        event.target.value,
+                      )
+                    }
+                    placeholder="Example: Exness-MT5Trial9"
+                  />
+                </label>
+
+                <label className="settings-field">
+                  <span>MT5 Password</span>
+
+                  <input
+                    type="password"
+                    value={mt5Form.password}
+                    onChange={(event) =>
+                      updateMt5Field(
+                        "password",
+                        event.target.value,
+                      )
+                    }
+                    placeholder="Trading account password"
+                    autoComplete="new-password"
+                  />
+
+                  <small>
+                    Password is sent only when connecting and is
+                    not saved in the MT5 account database record.
+                  </small>
+                </label>
+
+                <label className="settings-field">
+                  <span>Account name (optional)</span>
+
+                  <input
+                    type="text"
+                    value={mt5Form.account_name}
+                    onChange={(event) =>
+                      updateMt5Field(
+                        "account_name",
+                        event.target.value,
+                      )
+                    }
+                    placeholder="Personal trading account"
+                  />
+                </label>
+
+                <label className="settings-field">
+                  <span>Account currency</span>
+
+                  <input
+                    type="text"
+                    maxLength="10"
+                    value={mt5Form.currency}
+                    onChange={(event) =>
+                      updateMt5Field(
+                        "currency",
+                        event.target.value,
+                      )
+                    }
+                    placeholder="USD"
+                  />
+                </label>
+
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={connectMt5}
+                  disabled={mt5Connecting}
+                >
+                  {mt5Connecting
+                    ? "Connecting..."
+                    : "Connect MetaTrader 5"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
       <div className="settings-grid">
         <div className="analysis-panel">
           <div className="panel-heading">
@@ -2423,6 +2685,7 @@ function describeSupportResistance(
 }
 
 export default App;
+
 
 
 
