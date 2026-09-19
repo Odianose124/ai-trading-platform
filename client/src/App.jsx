@@ -28,6 +28,7 @@ import MarketsPage from "./MarketsPage";
 import AIAnalysisPage from "./AIAnalysisPage";
 import TradingPage from "./TradingPage";
 import LoginPage from "./LoginPage.jsx";
+import RegisterPage from "./RegisterPage.jsx";
 import ManualTradePage from "./ManualTradePage.jsx";
 import PositionsPage from "./PositionsPage.jsx";
 import "./App.css";
@@ -160,6 +161,8 @@ function AuthenticationGate() {
           path="/login"
           element={<LoginPage />}
         />
+
+        <Route path="/register" element={<RegisterPage />} />
 
         <Route
           path="*"
@@ -2420,6 +2423,8 @@ function describeSupportResistance(
 }
 
 export default App;
+
+
 
 
 
