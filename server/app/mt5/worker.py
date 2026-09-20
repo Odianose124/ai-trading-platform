@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import subprocess
@@ -1462,11 +1462,81 @@ class MT5AccountWorker:
                 "The MT5 account worker is not connected."
             )
 
+        if not isinstance(request, dict):
+            raise MT5WorkerError(
+                "MT5 margin calculation request must be a dictionary."
+            )
+
+        normalized_request = self._normalize_order_request(
+            request
+        )
+
+        order_type = normalized_request.get("order_type")
+
+        if isinstance(order_type, str):
+            order_type_mapping = {
+                "BUY": mt5.ORDER_TYPE_BUY,
+                "SELL": mt5.ORDER_TYPE_SELL,
+            }
+
+            normalized_order_type = order_type.strip().upper()
+
+            if normalized_order_type not in order_type_mapping:
+                raise MT5WorkerError(
+                    f"Unsupported MT5 margin order type: {order_type}"
+                )
+
+            order_type = order_type_mapping[normalized_order_type]
+
+        try:
+            order_type = int(order_type)
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "MT5 margin order type must be BUY, SELL, or an integer."
+            ) from exc
+
+        symbol = str(
+            normalized_request.get("symbol", "")
+        ).strip()
+
+        if not symbol:
+            raise MT5WorkerError(
+                "MT5 margin calculation symbol is required."
+            )
+
+        try:
+            volume = float(
+                normalized_request.get("volume")
+            )
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "MT5 margin calculation volume must be numeric."
+            ) from exc
+
+        if volume <= 0:
+            raise MT5WorkerError(
+                "MT5 margin calculation volume must be greater than zero."
+            )
+
+        try:
+            price = float(
+                normalized_request.get("price")
+            )
+        except (TypeError, ValueError) as exc:
+            raise MT5WorkerError(
+                "MT5 margin calculation price must be numeric."
+            ) from exc
+
+        if price <= 0:
+            raise MT5WorkerError(
+                "MT5 margin calculation price must be greater than zero."
+            )
+
         result = mt5.order_calc_margin(
-            request["order_type"],
-            request["symbol"],
-            request["volume"],
-            request["price"],
+            order_type,
+            symbol,
+            volume,
+            price,
         )
 
         if result is None:
@@ -1479,7 +1549,235 @@ class MT5AccountWorker:
             "margin": result,
         }
 
-    # ------------------------------------------------------------------
+    def _normalize_order_request(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Convert platform-level semantic order values into MT5-native
+        constants inside the isolated account worker.
+        """
+
+        final_request = dict(request)
+
+        order_type = final_request.get("type")
+
+        if isinstance(order_type, str):
+            normalized_type = order_type.strip().upper()
+
+            type_mapping = {
+                "BUY": mt5.ORDER_TYPE_BUY,
+                "SELL": mt5.ORDER_TYPE_SELL,
+                "BUY_LIMIT": mt5.ORDER_TYPE_BUY_LIMIT,
+                "BUY_STOP": mt5.ORDER_TYPE_BUY_STOP,
+                "SELL_LIMIT": mt5.ORDER_TYPE_SELL_LIMIT,
+                "SELL_STOP": mt5.ORDER_TYPE_SELL_STOP,
+            }
+
+            try:
+                final_request["type"] = type_mapping[
+                    normalized_type
+                ]
+            except KeyError as exc:
+                raise MT5WorkerError(
+                    f"Unsupported MT5 order type: {order_type}"
+                ) from exc
+
+        action = final_request.get("action")
+
+        if isinstance(action, str):
+            action_mapping = {
+                "DEAL": mt5.TRADE_ACTION_DEAL,
+                "PENDING": mt5.TRADE_ACTION_PENDING,
+            }
+
+            normalized_action = action.strip().upper()
+
+            try:
+                final_request["action"] = action_mapping[
+                    normalized_action
+                ]
+            except KeyError as exc:
+                raise MT5WorkerError(
+                    f"Unsupported MT5 trade action: {action}"
+                ) from exc
+
+        filling = final_request.get("type_filling")
+
+        if isinstance(filling, str):
+            filling_mapping = {
+                "FOK": mt5.ORDER_FILLING_FOK,
+                "IOC": mt5.ORDER_FILLING_IOC,
+                "RETURN": mt5.ORDER_FILLING_RETURN,
+            }
+
+            normalized_filling = filling.strip().upper()
+
+            try:
+                final_request["type_filling"] = filling_mapping[
+                    normalized_filling
+                ]
+            except KeyError as exc:
+                raise MT5WorkerError(
+                    f"Unsupported MT5 filling mode: {filling}"
+                ) from exc
+
+        type_time = final_request.get("type_time")
+
+        if isinstance(type_time, str):
+            time_mapping = {
+                "GTC": mt5.ORDER_TIME_GTC,
+            }
+
+            normalized_type_time = type_time.strip().upper()
+
+            try:
+                final_request["type_time"] = time_mapping[
+                    normalized_type_time
+                ]
+            except KeyError as exc:
+                raise MT5WorkerError(
+                    f"Unsupported MT5 order time type: {type_time}"
+                ) from exc
+
+        broker_symbol = str(
+            final_request.get("symbol", "")
+        ).strip()
+
+        if broker_symbol:
+            symbol_info = mt5.symbol_info(
+                broker_symbol
+            )
+
+            if symbol_info is None:
+                raise MT5WorkerError(
+                    "Unable to read MT5 symbol information for "
+                    f"{broker_symbol}: {mt5.last_error()}"
+                )
+
+            market_execution = (
+                int(
+                    getattr(
+                        symbol_info,
+                        "trade_exemode",
+                        0,
+                    )
+                    or 0
+                )
+                == getattr(
+                    mt5,
+                    "SYMBOL_TRADE_EXECUTION_MARKET",
+                    2,
+                )
+            )
+
+            if (
+                str(
+                    request.get("execution_mode", "")
+                ).strip().lower()
+                == "market"
+                and market_execution
+            ):
+                final_request.pop("price", None)
+
+        final_request.pop(
+            "execution_mode",
+            None,
+        )
+
+        return final_request
+
+    @staticmethod
+    def _retcode_description(
+        retcode: int,
+    ) -> str:
+        descriptions = {
+            getattr(
+                mt5,
+                "TRADE_RETCODE_DONE",
+                -1,
+            ): "Request completed successfully",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_PLACED",
+                -1,
+            ): "Order placed successfully",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_DONE_PARTIAL",
+                -1,
+            ): "Request partially completed",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_REQUOTE",
+                -1,
+            ): "Requote",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_REJECT",
+                -1,
+            ): "Request rejected",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_CANCEL",
+                -1,
+            ): "Request cancelled",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_INVALID",
+                -1,
+            ): "Invalid request",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_INVALID_VOLUME",
+                -1,
+            ): "Invalid volume",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_INVALID_PRICE",
+                -1,
+            ): "Invalid price",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_INVALID_STOPS",
+                -1,
+            ): "Invalid stops",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_TRADE_DISABLED",
+                -1,
+            ): "Trading disabled",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_MARKET_CLOSED",
+                -1,
+            ): "Market closed",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_NO_MONEY",
+                -1,
+            ): "Insufficient money",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_PRICE_CHANGED",
+                -1,
+            ): "Price changed",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_PRICE_OFF",
+                -1,
+            ): "No price available",
+            getattr(
+                mt5,
+                "TRADE_RETCODE_INVALID_FILL",
+                -1,
+            ): "Invalid filling mode",
+        }
+
+        return descriptions.get(
+            retcode,
+            f"MT5 retcode {retcode}",
+        )
     # ORDER PREFLIGHT CHECK
     # ------------------------------------------------------------------
 
@@ -1503,7 +1801,13 @@ class MT5AccountWorker:
                 "MT5 order check request must be a dictionary."
             )
 
-        result = mt5.order_check(request)
+        normalized_request = self._normalize_order_request(
+            request
+        )
+
+        result = mt5.order_check(
+            normalized_request
+        )
 
         if result is None:
             raise MT5WorkerError(
@@ -1511,8 +1815,18 @@ class MT5AccountWorker:
                 f"{mt5.last_error()}"
             )
 
+        retcode = getattr(result, "retcode", None)
+
+        accepted_retcodes = {
+            getattr(mt5, "TRADE_RETCODE_DONE", -999999),
+            getattr(mt5, "TRADE_RETCODE_PLACED", -999998),
+            getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", -999997),
+        }
+
         return {
-            "retcode": getattr(result, "retcode", None),
+            "retcode": retcode,
+            "retcode_description": self._retcode_description(retcode),
+            "accepted": retcode in accepted_retcodes,
             "comment": getattr(result, "comment", None),
             "balance": getattr(result, "balance", None),
             "equity": getattr(result, "equity", None),
@@ -1520,7 +1834,6 @@ class MT5AccountWorker:
             "margin_free": getattr(result, "margin_free", None),
             "margin_level": getattr(result, "margin_level", None),
         }
-
     # ------------------------------------------------------------------
     # ORDER EXECUTION
     # ------------------------------------------------------------------
@@ -1573,16 +1886,20 @@ class MT5AccountWorker:
                 "MT5 order volume must be greater than zero."
             )
 
+        normalized_request = self._normalize_order_request(
+            request
+        )
+
         try:
             order_type = int(
-                request.get("type")
+                normalized_request.get("type")
             )
         except (TypeError, ValueError) as exc:
             raise MT5WorkerError(
-                "MT5 order type must be an integer."
+                "MT5 order type must be an integer after normalization."
             ) from exc
 
-        trade_action = request.get(
+        trade_action = normalized_request.get(
             "action",
             mt5.TRADE_ACTION_DEAL,
         )
@@ -1591,7 +1908,7 @@ class MT5AccountWorker:
             trade_action = int(trade_action)
         except (TypeError, ValueError) as exc:
             raise MT5WorkerError(
-                "MT5 trade action must be an integer."
+                "MT5 trade action must be an integer after normalization."
             ) from exc
 
         symbol_info = mt5.symbol_info(
@@ -1620,7 +1937,7 @@ class MT5AccountWorker:
                     f"{broker_symbol}: {error}"
                 )
 
-        final_request = dict(request)
+        final_request = dict(normalized_request)
 
         final_request["symbol"] = broker_symbol
         final_request["volume"] = volume
@@ -1639,12 +1956,36 @@ class MT5AccountWorker:
                 f"MT5 last_error={error}"
             )
 
-        return {
-            "retcode": getattr(
-                result,
-                "retcode",
-                None,
+        retcode = getattr(
+            result,
+            "retcode",
+            None,
+        )
+
+        accepted_retcodes = {
+            getattr(
+                mt5,
+                "TRADE_RETCODE_DONE",
+                -999999,
             ),
+            getattr(
+                mt5,
+                "TRADE_RETCODE_PLACED",
+                -999998,
+            ),
+            getattr(
+                mt5,
+                "TRADE_RETCODE_DONE_PARTIAL",
+                -999997,
+            ),
+        }
+
+        return {
+            "retcode": retcode,
+            "retcode_description": self._retcode_description(
+                retcode
+            ),
+            "accepted": retcode in accepted_retcodes,
             "comment": getattr(
                 result,
                 "comment",
@@ -1692,6 +2033,9 @@ class MT5AccountWorker:
             ),
             "last_error": mt5.last_error(),
         }
+
+
+
 
 
 

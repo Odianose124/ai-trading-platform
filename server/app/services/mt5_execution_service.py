@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 
@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-import MetaTrader5 as mt5
 
 from app.mt5.worker_manager import (
     mt5_worker_manager,
@@ -125,8 +124,9 @@ class MT5ExecutionService:
     Final MT5 execution layer.
 
     IMPORTANT:
-    This is the ONLY service in this stage that is allowed
-    to call mt5.order_send().
+    Actual broker execution is delegated to the isolated
+    account worker. This service prepares and validates
+    the platform-level execution request.
 
     The service performs fresh broker validation immediately
     before sending the order.
@@ -193,63 +193,6 @@ class MT5ExecutionService:
         return difference, percentage
 
     @staticmethod
-    def _retcode_description(retcode: int) -> str:
-        descriptions = {
-            getattr(mt5, "TRADE_RETCODE_DONE", -1):
-                "Request completed successfully",
-
-            getattr(mt5, "TRADE_RETCODE_PLACED", -1):
-                "Order placed successfully",
-
-            getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", -1):
-                "Request partially completed",
-
-            getattr(mt5, "TRADE_RETCODE_REQUOTE", -1):
-                "Requote",
-
-            getattr(mt5, "TRADE_RETCODE_REJECT", -1):
-                "Request rejected",
-
-            getattr(mt5, "TRADE_RETCODE_CANCEL", -1):
-                "Request cancelled",
-
-            getattr(mt5, "TRADE_RETCODE_INVALID", -1):
-                "Invalid request",
-
-            getattr(mt5, "TRADE_RETCODE_INVALID_VOLUME", -1):
-                "Invalid volume",
-
-            getattr(mt5, "TRADE_RETCODE_INVALID_PRICE", -1):
-                "Invalid price",
-
-            getattr(mt5, "TRADE_RETCODE_INVALID_STOPS", -1):
-                "Invalid stops",
-
-            getattr(mt5, "TRADE_RETCODE_TRADE_DISABLED", -1):
-                "Trading disabled",
-
-            getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", -1):
-                "Market closed",
-
-            getattr(mt5, "TRADE_RETCODE_NO_MONEY", -1):
-                "Insufficient money",
-
-            getattr(mt5, "TRADE_RETCODE_PRICE_CHANGED", -1):
-                "Price changed",
-
-            getattr(mt5, "TRADE_RETCODE_PRICE_OFF", -1):
-                "No price available",
-
-            getattr(mt5, "TRADE_RETCODE_INVALID_FILL", -1):
-                "Invalid filling mode",
-        }
-
-        return descriptions.get(
-            retcode,
-            f"MT5 returned retcode {retcode}",
-        )
-
-    @staticmethod
     def _risk_amount(
         *,
         mt5_account_id: int,
@@ -309,7 +252,7 @@ class MT5ExecutionService:
     def _select_filling_mode(
         self,
         symbol_info: Any,
-    ) -> int:
+    ) -> str:
         filling_flags = int(
             getattr(
                 symbol_info,
@@ -319,35 +262,20 @@ class MT5ExecutionService:
             or 0
         )
 
-        symbol_fok = getattr(
-            mt5,
-            "SYMBOL_FILLING_FOK",
-            1,
-        )
-
-        symbol_ioc = getattr(
-            mt5,
-            "SYMBOL_FILLING_IOC",
-            2,
-        )
-
-        order_fok = getattr(
-            mt5,
-            "ORDER_FILLING_FOK",
-            0,
-        )
-
-        order_ioc = getattr(
-            mt5,
-            "ORDER_FILLING_IOC",
-            1,
-        )
+        # MT5 symbol filling flags:
+        # FOK = 1
+        # IOC = 2
+        #
+        # Keep these as platform-level semantic values here.
+        # The isolated MT5 worker converts them to MT5-native constants.
+        symbol_fok = 1
+        symbol_ioc = 2
 
         if filling_flags & symbol_ioc:
-            return order_ioc
+            return "IOC"
 
         if filling_flags & symbol_fok:
-            return order_fok
+            return "FOK"
 
         raise MT5ExecutionError(
             "Broker does not advertise a supported FOK or IOC "
@@ -404,27 +332,27 @@ class MT5ExecutionService:
         direction: str,
         execution_mode: str,
         order_type_name: str,
-    ) -> int:
+    ) -> str:
         if execution_mode == "market":
             return (
-                mt5.ORDER_TYPE_BUY
+                "BUY"
                 if direction == "buy"
-                else mt5.ORDER_TYPE_SELL
+                else "SELL"
             )
 
-        mapping = {
-            "BUY_LIMIT": mt5.ORDER_TYPE_BUY_LIMIT,
-            "BUY_STOP": mt5.ORDER_TYPE_BUY_STOP,
-            "SELL_LIMIT": mt5.ORDER_TYPE_SELL_LIMIT,
-            "SELL_STOP": mt5.ORDER_TYPE_SELL_STOP,
+        allowed_types = {
+            "BUY_LIMIT",
+            "BUY_STOP",
+            "SELL_LIMIT",
+            "SELL_STOP",
         }
 
-        try:
-            return mapping[order_type_name]
-        except KeyError as exc:
+        if order_type_name not in allowed_types:
             raise MT5ExecutionError(
                 f"Unsupported pending order type: {order_type_name}"
-            ) from exc
+            )
+
+        return order_type_name
 
     def execute(
         self,
@@ -991,9 +919,9 @@ class MT5ExecutionService:
 
         if execution_mode == "pending":
             margin_order_type = (
-                mt5.ORDER_TYPE_BUY
+                "BUY"
                 if normalized_direction == "buy"
-                else mt5.ORDER_TYPE_SELL
+                else "SELL"
             )
 
             margin_price = (
@@ -1001,6 +929,7 @@ class MT5ExecutionService:
                 if normalized_direction == "buy"
                 else bid_price
             )
+
 
             checks.append(
                 "Pending-order margin calculated using equivalent "
@@ -1199,35 +1128,15 @@ class MT5ExecutionService:
         )
 
         # ---------------------------------------------------------
+        # ---------------------------------------------------------
         # BUILD MT5 REQUEST
         # ---------------------------------------------------------
 
-        trade_exemode = int(
-            getattr(
-                symbol_info,
-                "trade_exemode",
-                getattr(
-                    mt5,
-                    "SYMBOL_TRADE_EXECUTION_INSTANT",
-                    1,
-                ),
-            )
-            or 0
-        )
-
-        market_execution = (
-            trade_exemode
-            == getattr(
-                mt5,
-                "SYMBOL_TRADE_EXECUTION_MARKET",
-                2,
-            )
-        )
-
         if execution_mode == "pending":
-            filling_mode = mt5.ORDER_FILLING_RETURN
-            trade_action = mt5.TRADE_ACTION_PENDING
+            filling_mode = "RETURN"
+            trade_action = "PENDING"
             request_price = signal_entry
+
             checks.append(
                 "MT5 pending-order request constructed with RETURN filling"
             )
@@ -1235,15 +1144,25 @@ class MT5ExecutionService:
             filling_mode = self._select_filling_mode(
                 symbol_info
             )
-            trade_action = mt5.TRADE_ACTION_DEAL
+            trade_action = "DEAL"
             request_price = execution_price
 
             checks.append(
                 "MT5 market-order request constructed"
             )
 
+            trade_exemode = int(
+                getattr(
+                    symbol_info,
+                    "trade_exemode",
+                    0,
+                )
+                or 0
+            )
+
             checks.append(
-                f"MT5 symbol trade execution mode={trade_exemode}"
+                "MT5 symbol trade execution mode="
+                f"{trade_exemode}; worker will apply broker execution rules"
             )
 
         request = {
@@ -1256,21 +1175,12 @@ class MT5ExecutionService:
             "deviation": 20,
             "magic": 202609,
             "comment": comment,
-            "type_time": mt5.ORDER_TIME_GTC,
+            "type_time": "GTC",
             "type_filling": filling_mode,
+            "execution_mode": execution_mode,
+            "price": float(request_price),
         }
 
-        if not (
-            execution_mode == "market"
-            and market_execution
-        ):
-            request["price"] = float(request_price)
-        else:
-            checks.append(
-                "Market Execution request intentionally omits price"
-            )
-
-        # ---------------------------------------------------------
         # FINAL PRE-SEND CHECK
         # ---------------------------------------------------------
 
@@ -1448,15 +1358,34 @@ class MT5ExecutionService:
                 ),
             )
 
-        preflight_retcode = int(
-            getattr(preflight, "retcode", 0) or 0
+        preflight_retcode = getattr(
+            preflight,
+            "retcode",
+            None,
+        )
+
+        preflight_retcode_description = str(
+            getattr(
+                preflight,
+                "retcode_description",
+                "",
+            )
+            or ""
         )
 
         preflight_comment = str(
             getattr(preflight, "comment", "") or ""
         )
 
-        if preflight_retcode != 0:
+        preflight_accepted = bool(
+            getattr(
+                preflight,
+                "accepted",
+                False,
+            )
+        )
+
+        if not preflight_accepted:
             return MT5ExecutionResult(
                 approved=False,
                 status="preflight_failed",
@@ -1477,6 +1406,7 @@ class MT5ExecutionService:
                 errors=[
                     "MT5 order_check failed: "
                     f"retcode={preflight_retcode}, "
+                    f"description={preflight_retcode_description}, "
                     f"comment={preflight_comment}"
                 ],
                 execution_sent=False,
@@ -1489,6 +1419,7 @@ class MT5ExecutionService:
         checks.append(
             "MT5 order_check passed: "
             f"retcode={preflight_retcode}, "
+            f"description={preflight_retcode_description}, "
             f"comment={preflight_comment}"
         )
 
@@ -1589,38 +1520,28 @@ class MT5ExecutionService:
                 ),
             )
 
-        retcode = int(
+        retcode = getattr(
+            result,
+            "retcode",
+            None,
+        )
+
+        retcode_description = str(
             getattr(
                 result,
-                "retcode",
-                0,
+                "retcode_description",
+                "",
             )
-            or 0
+            or ""
         )
 
-        retcode_description = (
-            self._retcode_description(
-                retcode
+        execution_accepted = bool(
+            getattr(
+                result,
+                "accepted",
+                False,
             )
         )
-
-        success_codes = {
-            getattr(
-                mt5,
-                "TRADE_RETCODE_DONE",
-                -1,
-            ),
-            getattr(
-                mt5,
-                "TRADE_RETCODE_PLACED",
-                -1,
-            ),
-            getattr(
-                mt5,
-                "TRADE_RETCODE_DONE_PARTIAL",
-                -1,
-            ),
-        }
 
         order_ticket = getattr(
             result,
@@ -1636,7 +1557,7 @@ class MT5ExecutionService:
 
         execution_sent = True
 
-        if retcode not in success_codes:
+        if not execution_accepted:
             return MT5ExecutionResult(
                 approved=False,
                 status="rejected_by_mt5",
@@ -1778,3 +1699,5 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
+
+
