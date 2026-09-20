@@ -752,7 +752,10 @@ class MT5AccountWorker:
             BrokerValidationService,
         )
 
-        validator = BrokerValidationService()
+        validator = BrokerValidationService(
+            mt5_module=mt5,
+            connection=None,
+        )
 
         result = validator.validate(
             symbol=symbol,
@@ -1689,6 +1692,8 @@ class MT5AccountWorker:
             ),
             "last_error": mt5.last_error(),
         }
+
+
 
 
 

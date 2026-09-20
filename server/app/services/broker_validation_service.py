@@ -1,12 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 import MetaTrader5 as mt5
-
-from app.mt5.connection import mt5_connection
 
 
 class BrokerValidationError(Exception):
@@ -119,8 +117,13 @@ class BrokerValidationService:
         "short": mt5.ORDER_TYPE_SELL,
     }
 
-    def __init__(self):
-        self.connection = mt5_connection
+    def __init__(
+        self,
+        mt5_module=mt5,
+        connection=None,
+    ):
+        self.mt5 = mt5_module
+        self.connection = connection
 
     # ============================================================
     # HELPERS
@@ -172,19 +175,19 @@ class BrokerValidationService:
             )
 
         # Exact broker symbol
-        info = mt5.symbol_info(requested)
+        info = self.mt5.symbol_info(requested)
 
         if info is not None:
             if not info.visible:
-                mt5.symbol_select(requested, True)
+                self.mt5.symbol_select(requested, True)
 
             return requested
 
         # Search broker symbols
-        symbols = mt5.symbols_get()
+        symbols = self.mt5.symbols_get()
 
         if symbols is None:
-            error = mt5.last_error()
+            error = self.mt5.last_error()
 
             raise BrokerValidationError(
                 f"Unable to retrieve broker symbols: {error}"
@@ -198,7 +201,7 @@ class BrokerValidationService:
 
             if name.lower() == requested_lower:
                 if not item.visible:
-                    mt5.symbol_select(name, True)
+                    self.mt5.symbol_select(name, True)
 
                 return name
 
@@ -226,7 +229,7 @@ class BrokerValidationService:
 
             resolved = suffix_matches[0]
 
-            if not mt5.symbol_select(resolved, True):
+            if not self.mt5.symbol_select(resolved, True):
                 raise BrokerValidationError(
                     f"Broker symbol found but could not be selected: {resolved}"
                 )
@@ -487,13 +490,16 @@ class BrokerValidationService:
         # MT5 INITIALIZATION
         # --------------------------------------------------------
 
-        try:
-            connected = self.connection.ensure_connected()
-        except AttributeError:
-            connected = self.connection.connect()
+        if self.connection is not None:
+            try:
+                connected = self.connection.ensure_connected()
+            except AttributeError:
+                connected = self.connection.connect()
+        else:
+            connected = self.mt5.account_info() is not None
 
         if not connected:
-            error = mt5.last_error()
+            error = self.mt5.last_error()
 
             return BrokerValidationResult(
                 approved=False,
@@ -583,11 +589,11 @@ class BrokerValidationService:
         # SYMBOL INFO
         # --------------------------------------------------------
 
-        info = mt5.symbol_info(broker_symbol)
+        info = self.mt5.symbol_info(broker_symbol)
 
         if info is None:
 
-            error = mt5.last_error()
+            error = self.mt5.last_error()
 
             return BrokerValidationResult(
                 approved=False,
@@ -637,11 +643,11 @@ class BrokerValidationService:
 
         if not info.visible:
 
-            if not mt5.symbol_select(
+            if not self.mt5.symbol_select(
                 broker_symbol,
                 True,
             ):
-                error = mt5.last_error()
+                error = self.mt5.last_error()
 
                 return BrokerValidationResult(
                     approved=False,
@@ -685,13 +691,13 @@ class BrokerValidationService:
         # LIVE TICK
         # --------------------------------------------------------
 
-        tick = mt5.symbol_info_tick(
+        tick = self.mt5.symbol_info_tick(
             broker_symbol
         )
 
         if tick is None:
 
-            error = mt5.last_error()
+            error = self.mt5.last_error()
 
             return BrokerValidationResult(
                 approved=False,
@@ -840,15 +846,15 @@ class BrokerValidationService:
 
         trade_mode = int(info.trade_mode)
 
-        if trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
+        if trade_mode == self.mt5.SYMBOL_TRADE_MODE_DISABLED:
             errors.append(
                 "Broker has disabled trading for this symbol"
             )
-        elif trade_mode == mt5.SYMBOL_TRADE_MODE_CLOSEONLY:
+        elif trade_mode == self.mt5.SYMBOL_TRADE_MODE_CLOSEONLY:
             errors.append(
                 "Broker currently allows closing only for this symbol"
             )
-        elif trade_mode == mt5.SYMBOL_TRADE_MODE_FULL:
+        elif trade_mode == self.mt5.SYMBOL_TRADE_MODE_FULL:
             checks.append(
                 "Broker symbol permits full trading"
             )
@@ -1029,15 +1035,15 @@ class BrokerValidationService:
 
                 if normalized_direction == "buy":
                     order_type = (
-                        mt5.ORDER_TYPE_BUY_STOP
+                        self.mt5.ORDER_TYPE_BUY_STOP
                         if supplied_entry > ask
-                        else mt5.ORDER_TYPE_BUY_LIMIT
+                        else self.mt5.ORDER_TYPE_BUY_LIMIT
                     )
                 else:
                     order_type = (
-                        mt5.ORDER_TYPE_SELL_STOP
+                        self.mt5.ORDER_TYPE_SELL_STOP
                         if supplied_entry < bid
-                        else mt5.ORDER_TYPE_SELL_LIMIT
+                        else self.mt5.ORDER_TYPE_SELL_LIMIT
                     )
 
                 margin_price = supplied_entry
@@ -1050,7 +1056,7 @@ class BrokerValidationService:
 
                 margin_price = execution_price
 
-            margin_required_raw = mt5.order_calc_margin(
+            margin_required_raw = self.mt5.order_calc_margin(
                 order_type,
                 broker_symbol,
                 float(requested_volume),
@@ -1059,7 +1065,7 @@ class BrokerValidationService:
 
             if margin_required_raw is None:
 
-                error = mt5.last_error()
+                error = self.mt5.last_error()
 
                 warnings.append(
                     f"Unable to calculate broker margin: {error}"
@@ -1071,7 +1077,7 @@ class BrokerValidationService:
                     str(margin_required_raw)
                 )
 
-                account_info = mt5.account_info()
+                account_info = self.mt5.account_info()
 
                 if account_info is not None:
 
@@ -1166,3 +1172,9 @@ class BrokerValidationService:
 
 
 broker_validation_service = BrokerValidationService()
+
+
+
+
+
+
