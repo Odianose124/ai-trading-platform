@@ -1,5 +1,12 @@
 ﻿import { useState } from "react";
-import { Bot, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
+import {
+  Bot,
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+} from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "./services/api";
 
@@ -7,20 +14,23 @@ function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [email, setEmail] = useState(location.state?.registeredEmail || "");
+  const [email, setEmail] = useState(
+    location.state?.registeredEmail || "",
+  );
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const redirectPath =
-    location.state?.from?.pathname ||
-    "/";
+    location.state?.from?.pathname || "/";
 
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (!email.trim() || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
       setError("Please enter your email and password.");
       return;
     }
@@ -31,7 +41,7 @@ function LoginPage() {
     try {
       const formData = new URLSearchParams();
 
-      formData.append("username", email.trim());
+      formData.append("username", normalizedEmail);
       formData.append("password", password);
 
       const response = await api.post(
@@ -58,14 +68,57 @@ function LoginPage() {
         token,
       );
 
+      /*
+       * Validate the newly issued token before leaving
+       * the login page. This prevents a successful login
+       * from appearing to fail after the application
+       * reloads and validates /api/auth/me.
+       */
+      const sessionResponse = await api.get(
+        "/api/auth/me",
+      );
+
+      if (!sessionResponse?.data?.id) {
+        throw new Error(
+          "The server could not validate the authenticated session.",
+        );
+      }
+
       window.location.assign(redirectPath);
     } catch (requestError) {
       const detail =
         requestError?.response?.data?.detail;
 
-      setError(
-        detail ||
-          "Unable to sign in. Please check your credentials and try again.",
+      if (
+        requestError?.response?.status === 401
+      ) {
+        setError(
+          "Unable to sign in. Please check your email and password.",
+        );
+      } else if (
+        requestError?.response?.status === 403
+      ) {
+        setError(
+          detail ||
+            "Your account is inactive. Please contact support.",
+        );
+      } else if (detail) {
+        setError(
+          Array.isArray(detail)
+            ? detail[0]?.msg ||
+                "Unable to sign in. Please try again."
+            : detail,
+        );
+      } else if (requestError?.message) {
+        setError(requestError.message);
+      } else {
+        setError(
+          "Unable to sign in. Please try again.",
+        );
+      }
+
+      localStorage.removeItem(
+        "ai_trading_access_token",
       );
     } finally {
       setLoading(false);
@@ -132,6 +185,7 @@ function LoginPage() {
                 placeholder="you@example.com"
                 autoComplete="email"
                 disabled={loading}
+                required
                 style={styles.input}
               />
             </div>
@@ -159,6 +213,7 @@ function LoginPage() {
                 placeholder="Enter your password"
                 autoComplete="current-password"
                 disabled={loading}
+                required
                 style={{
                   ...styles.input,
                   paddingRight: "48px",
@@ -210,6 +265,7 @@ function LoginPage() {
             type="button"
             onClick={() => navigate("/register")}
             style={styles.registerLink}
+            disabled={loading}
           >
             Create account
           </button>

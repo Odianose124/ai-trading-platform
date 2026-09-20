@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useMemo, useState } from "react";
 import {
   Bot,
   Eye,
@@ -7,6 +7,7 @@ import {
   Mail,
   User,
   ShieldCheck,
+  CheckCircle2,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "./services/api";
@@ -24,6 +25,56 @@ function RegisterPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const passwordChecks = useMemo(
+    () => ({
+      length: password.length >= 8,
+      uppercase: /[A-Z]/.test(password),
+      lowercase: /[a-z]/.test(password),
+      number: /\d/.test(password),
+    }),
+    [password],
+  );
+
+  const passwordStrength = useMemo(() => {
+    if (!password) {
+      return {
+        label: "",
+        percentage: 0,
+      };
+    }
+
+    const score = Object.values(passwordChecks).filter(Boolean).length;
+
+    if (score <= 1) {
+      return {
+        label: "Weak",
+        percentage: 25,
+      };
+    }
+
+    if (score === 2) {
+      return {
+        label: "Fair",
+        percentage: 50,
+      };
+    }
+
+    if (score === 3) {
+      return {
+        label: "Good",
+        percentage: 75,
+      };
+    }
+
+    return {
+      label: "Strong",
+      percentage: 100,
+    };
+  }, [password, passwordChecks]);
+
+  const passwordsMatch =
+    confirmPassword.length > 0 && password === confirmPassword;
+
   async function handleSubmit(event) {
     event.preventDefault();
 
@@ -32,16 +83,25 @@ function RegisterPage() {
 
     if (!normalizedEmail || !password || !confirmPassword) {
       setError("Please complete all required fields.");
+      setSuccess("");
       return;
     }
 
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
+      setSuccess("");
+      return;
+    }
+
+    if (password.length > 128) {
+      setError("Password must not exceed 128 characters.");
+      setSuccess("");
       return;
     }
 
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
+      setSuccess("");
       return;
     }
 
@@ -73,11 +133,22 @@ function RegisterPage() {
         setError(
           "An account with this email already exists. Please sign in instead.",
         );
+      } else if (requestError?.response?.status === 422) {
+        if (Array.isArray(detail)) {
+          const firstError = detail[0]?.msg;
+          setError(firstError || "Please check the information provided.");
+        } else {
+          setError(
+            detail || "Please check the information provided and try again.",
+          );
+        }
       } else if (Array.isArray(detail)) {
         const firstError = detail[0]?.msg;
         setError(firstError || "Unable to create your account.");
       } else {
-        setError(detail || "Unable to create your account. Please try again.");
+        setError(
+          detail || "Unable to create your account. Please try again.",
+        );
       }
     } finally {
       setLoading(false);
@@ -111,7 +182,12 @@ function RegisterPage() {
 
         {error && <div style={styles.errorBox}>{error}</div>}
 
-        {success && <div style={styles.successBox}>{success}</div>}
+        {success && (
+          <div style={styles.successBox}>
+            <CheckCircle2 size={17} />
+            <span>{success}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <label style={styles.label}>
@@ -151,17 +227,22 @@ function RegisterPage() {
 
           <label style={styles.label}>
             Password
+
             <div style={styles.inputWrapper}>
               <LockKeyhole size={18} style={styles.inputIcon} />
 
               <input
                 type={showPassword ? "text" : "password"}
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setError("");
+                }}
                 placeholder="At least 8 characters"
                 autoComplete="new-password"
                 disabled={loading}
                 required
+                maxLength={128}
                 style={{
                   ...styles.input,
                   paddingRight: "48px",
@@ -178,26 +259,78 @@ function RegisterPage() {
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+
+            {password && (
+              <div style={styles.passwordStrength}>
+                <div style={styles.strengthHeader}>
+                  <span>Password strength</span>
+
+                  <span style={styles.strengthLabel}>
+                    {passwordStrength.label}
+                  </span>
+                </div>
+
+                <div style={styles.strengthTrack}>
+                  <div
+                    style={{
+                      ...styles.strengthFill,
+                      width: `${passwordStrength.percentage}%`,
+                    }}
+                  />
+                </div>
+
+                <div style={styles.passwordRequirements}>
+                  <PasswordRequirement
+                    valid={passwordChecks.length}
+                    text="8+ characters"
+                  />
+
+                  <PasswordRequirement
+                    valid={passwordChecks.uppercase}
+                    text="Uppercase letter"
+                  />
+
+                  <PasswordRequirement
+                    valid={passwordChecks.lowercase}
+                    text="Lowercase letter"
+                  />
+
+                  <PasswordRequirement
+                    valid={passwordChecks.number}
+                    text="Number"
+                  />
+                </div>
+              </div>
+            )}
           </label>
 
           <label style={styles.label}>
             Confirm password
+
             <div style={styles.inputWrapper}>
               <LockKeyhole size={18} style={styles.inputIcon} />
 
               <input
                 type={showConfirmPassword ? "text" : "password"}
                 value={confirmPassword}
-                onChange={(event) =>
-                  setConfirmPassword(event.target.value)
-                }
+                onChange={(event) => {
+                  setConfirmPassword(event.target.value);
+                  setError("");
+                }}
                 placeholder="Repeat your password"
                 autoComplete="new-password"
                 disabled={loading}
                 required
+                maxLength={128}
                 style={{
                   ...styles.input,
                   paddingRight: "48px",
+                  borderColor:
+                    confirmPassword && !passwordsMatch
+                      ? "rgba(239, 68, 68, 0.55)"
+                      : confirmPassword && passwordsMatch
+                        ? "rgba(34, 197, 94, 0.45)"
+                        : "rgba(148, 163, 184, 0.2)",
                 }}
               />
 
@@ -221,6 +354,19 @@ function RegisterPage() {
                 )}
               </button>
             </div>
+
+            {confirmPassword && (
+              <span
+                style={{
+                  ...styles.matchMessage,
+                  color: passwordsMatch ? "#86efac" : "#fca5a5",
+                }}
+              >
+                {passwordsMatch
+                  ? "Passwords match."
+                  : "Passwords do not match."}
+              </span>
+            )}
           </label>
 
           <button
@@ -229,6 +375,7 @@ function RegisterPage() {
             style={{
               ...styles.submitButton,
               opacity: loading || success ? 0.7 : 1,
+              cursor: loading || success ? "not-allowed" : "pointer",
             }}
           >
             {loading ? "Creating account..." : "Create account"}
@@ -253,6 +400,19 @@ function RegisterPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+function PasswordRequirement({ valid, text }) {
+  return (
+    <span
+      style={{
+        ...styles.requirement,
+        color: valid ? "#86efac" : "#64748b",
+      }}
+    >
+      {valid ? "✓" : "○"} {text}
+    </span>
   );
 }
 
@@ -360,6 +520,9 @@ const styles = {
   },
 
   successBox: {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
     padding: "12px 14px",
     marginBottom: "18px",
     borderRadius: "12px",
@@ -427,6 +590,57 @@ const styles = {
     background: "transparent",
     color: "#64748b",
     cursor: "pointer",
+  },
+
+  passwordStrength: {
+    marginTop: "2px",
+  },
+
+  strengthHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "7px",
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: 500,
+  },
+
+  strengthLabel: {
+    color: "#94a3b8",
+    fontWeight: 700,
+  },
+
+  strengthTrack: {
+    width: "100%",
+    height: "4px",
+    borderRadius: "999px",
+    background: "#1e293b",
+    overflow: "hidden",
+  },
+
+  strengthFill: {
+    height: "100%",
+    borderRadius: "999px",
+    background: "linear-gradient(90deg, #ef4444, #f59e0b, #22c55e)",
+    transition: "width 180ms ease",
+  },
+
+  passwordRequirements: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "5px 10px",
+    marginTop: "8px",
+  },
+
+  requirement: {
+    fontSize: "10px",
+    fontWeight: 500,
+  },
+
+  matchMessage: {
+    fontSize: "11px",
+    fontWeight: 600,
   },
 
   submitButton: {
