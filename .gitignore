@@ -1,0 +1,44 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+client/node_modules/
+client/dist/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Database / local files
+*.db
+*.sqlite
+*.sqlite3
+
+# MT5 runtime installations and generated state
+server/mt5-runtimes/
+
+# Logs
+*.log
+server/logs/
+logs/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
