@@ -118,9 +118,59 @@ class MT5RuntimeManager:
             exist_ok=True,
         )
 
+        # Provision broker server metadata separately from the
+        # account-specific terminal runtime.
+        #
+        # A fresh portable MT5 runtime may not be able to establish
+        # Python IPC until it has broker server metadata available.
+        #
+        # We copy ONLY servers.dat. We intentionally do not copy the
+        # user's MetaQuotes account/session data, credentials, or
+        # certificates.
+        server_data_root_value = settings.MT5_SERVER_DATA_ROOT
+
+        if not server_data_root_value:
+            raise MT5RuntimeConfigurationError(
+                "MT5_SERVER_DATA_ROOT is not configured."
+            )
+
+        server_data_root = (
+            Path(server_data_root_value)
+            .expanduser()
+            .resolve()
+        )
+
+        source_servers = server_data_root / "Config" / "servers.dat"
+        runtime_config = runtime.runtime_directory / "Config"
+        runtime_servers = runtime_config / "servers.dat"
+
+        if not source_servers.exists():
+            raise MT5RuntimeConfigurationError(
+                "The configured MT5 server metadata file does not exist: "
+                f"{source_servers}"
+            )
+
+        if not source_servers.is_file():
+            raise MT5RuntimeConfigurationError(
+                "The configured MT5 server metadata path is not a file: "
+                f"{source_servers}"
+            )
+
+        runtime_config.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        # Never overwrite an existing runtime servers.dat. MT5 may
+        # update this file as broker/server metadata changes.
+        if not runtime_servers.is_file():
+            shutil.copy2(
+                source_servers,
+                runtime_servers,
+            )
+
         # If this account runtime already contains its terminal,
-        # preserve the existing isolated runtime and do not overwrite
-        # account-specific portable data.
+        # preserve the existing isolated runtime.
         if runtime.terminal_path.is_file():
             runtime.validate()
             return runtime
@@ -330,3 +380,4 @@ class MT5RuntimeManager:
 
 
 mt5_runtime_manager = MT5RuntimeManager()
+
