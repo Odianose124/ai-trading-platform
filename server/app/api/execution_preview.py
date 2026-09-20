@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.models.mt5_trading_account import MT5TradingAccount
 from app.models.user import User
 from app.services.execution_preview_service import (
     ExecutionPreviewError,
@@ -52,14 +53,25 @@ def create_execution_preview(
     This endpoint DOES NOT send an MT5 order.
     """
 
-    # Keep the authenticated-user dependency active.
-    # The preview itself currently uses the connected MT5 account.
-    # User/account ownership will be enforced in the final execution layer.
-    _ = current_user
-    _ = db
+    mt5_account = (
+        db.query(MT5TradingAccount)
+        .filter(
+            MT5TradingAccount.user_id == current_user.id,
+            MT5TradingAccount.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if mt5_account is None or mt5_account.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active MT5 trading account not found.",
+        )
 
     try:
         preview = execution_preview_service.preview(
+            mt5_account_id=mt5_account.id,
+            user_id=current_user.id,
             symbol=payload.symbol,
             direction=payload.direction,
             volume=payload.volume,

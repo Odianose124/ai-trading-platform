@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from app.services.broker_validation_service import (
-    BrokerValidationError,
-    broker_validation_service,
+from app.mt5.worker_manager import (
+    MT5WorkerManagerError,
+    mt5_worker_manager,
 )
 
 
@@ -121,9 +121,6 @@ class ExecutionPreviewService:
     # is considered stale.
     MAX_SIGNAL_PRICE_DEVIATION_PERCENT = Decimal("0.25")
 
-    def __init__(self) -> None:
-        self.broker_validation = broker_validation_service
-
     @staticmethod
     def _to_decimal(value: Any, field_name: str) -> Decimal:
         try:
@@ -176,6 +173,8 @@ class ExecutionPreviewService:
 
     def _calculate_risk(
         self,
+        mt5_account_id: int,
+        user_id: int,
         direction: str,
         execution_price: Decimal,
         stop_loss: Decimal,
@@ -190,11 +189,13 @@ class ExecutionPreviewService:
         """
 
         try:
-            import MetaTrader5 as mt5
-        except ImportError:
+            symbol_info = mt5_worker_manager.symbol_info(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
+                symbol=broker_symbol,
+            )
+        except MT5WorkerManagerError:
             return None
-
-        symbol_info = mt5.symbol_info(broker_symbol)
 
         if symbol_info is None:
             return None
@@ -219,6 +220,8 @@ class ExecutionPreviewService:
     def preview(
         self,
         *,
+        mt5_account_id: int,
+        user_id: int,
         symbol: str,
         direction: str,
         volume: Any,
@@ -274,16 +277,30 @@ class ExecutionPreviewService:
         errors: list[str] = []
 
         try:
-            validation = self.broker_validation.validate(
+            validation_data = mt5_worker_manager.validate_trade(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
                 symbol=application_symbol,
                 direction=normalized_direction,
+                volume=requested_volume,
                 entry_price=signal_entry,
                 stop_loss=requested_stop_loss,
                 take_profit=requested_take_profit,
-                volume=requested_volume,
             )
 
-        except BrokerValidationError as exc:
+            class WorkerValidationResult:
+                pass
+
+            validation = WorkerValidationResult()
+
+            for key, value in validation_data.items():
+                setattr(
+                    validation,
+                    key,
+                    value,
+                )
+
+        except MT5WorkerManagerError as exc:
             return ExecutionPreview(
                 approved=False,
                 status="validation_error",
@@ -309,8 +326,6 @@ class ExecutionPreviewService:
                 execution_sent=False,
                 message="Execution preview could not be created.",
             )
-
-        validation_data = validation.serialize()
 
         broker_symbol = validation.broker_symbol
         execution_price_raw = validation.execution_price
@@ -388,6 +403,8 @@ class ExecutionPreviewService:
         )
 
         risk_amount = self._calculate_risk(
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
             direction=normalized_direction,
             execution_price=execution_price,
             stop_loss=requested_stop_loss,
@@ -458,7 +475,7 @@ class ExecutionPreviewService:
             signal_price_deviation_percent=deviation_percent,
             spread=(
                 self._to_decimal(
-                    validation_data["market"]["spread"],
+                    validation.spread,
                     "spread",
                 )
                 if validation_data["market"]["spread"] is not None
@@ -466,7 +483,7 @@ class ExecutionPreviewService:
             ),
             spread_points=(
                 self._to_decimal(
-                    validation_data["market"]["spread_points"],
+                    validation.spread_points,
                     "spread_points",
                 )
                 if validation_data["market"]["spread_points"] is not None
@@ -474,7 +491,7 @@ class ExecutionPreviewService:
             ),
             margin_required=(
                 self._to_decimal(
-                    validation_data["margin_required"],
+                    validation.margin_required,
                     "margin_required",
                 )
                 if validation_data["margin_required"] is not None
@@ -482,7 +499,7 @@ class ExecutionPreviewService:
             ),
             free_margin=(
                 self._to_decimal(
-                    validation_data["free_margin"],
+                    validation.free_margin,
                     "free_margin",
                 )
                 if validation_data["free_margin"] is not None

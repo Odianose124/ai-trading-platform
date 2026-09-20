@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 
@@ -9,11 +9,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 import MetaTrader5 as mt5
-
-from app.services.broker_validation_service import (
-    BrokerValidationError,
-    broker_validation_service,
-)
 
 from app.mt5.worker_manager import (
     mt5_worker_manager,
@@ -143,9 +138,6 @@ class MT5ExecutionService:
     # MT5 execution requires an explicitly enabled execution request.
     REQUIRE_EXPLICIT_EXECUTION = True
 
-    def __init__(self) -> None:
-        self.broker_validation = broker_validation_service
-
     @staticmethod
     def _decimal(
         value: Any,
@@ -260,6 +252,8 @@ class MT5ExecutionService:
     @staticmethod
     def _risk_amount(
         *,
+        mt5_account_id: int,
+        user_id: int,
         broker_symbol: str,
         direction: str,
         execution_price: Decimal,
@@ -268,10 +262,10 @@ class MT5ExecutionService:
     ) -> Optional[Decimal]:
 
         symbol_info = mt5_worker_manager.symbol_info(
-                mt5_account_id=mt5_account_id,
-                user_id=user_id,
-                symbol=broker_symbol,
-            )
+            mt5_account_id=mt5_account_id,
+            user_id=user_id,
+            symbol=broker_symbol,
+        )
 
         if symbol_info is None:
             return None
@@ -529,16 +523,30 @@ class MT5ExecutionService:
         # ---------------------------------------------------------
 
         try:
-            validation = self.broker_validation.validate(
+            validation_data = mt5_worker_manager.validate_trade(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
                 symbol=application_symbol,
                 direction=normalized_direction,
+                volume=requested_volume,
                 entry_price=signal_entry,
                 stop_loss=requested_stop_loss,
                 take_profit=requested_take_profit,
-                volume=requested_volume,
             )
 
-        except BrokerValidationError as exc:
+            class WorkerValidationResult:
+                pass
+
+            validation = WorkerValidationResult()
+
+            for key, value in validation_data.items():
+                setattr(
+                    validation,
+                    key,
+                    value,
+                )
+
+        except MT5WorkerManagerError as exc:
             return MT5ExecutionResult(
                 approved=False,
                 status="validation_error",
@@ -1552,6 +1560,8 @@ class MT5ExecutionService:
                 margin_required=margin_required,
                 free_margin=free_margin,
                 risk_amount=self._risk_amount(
+                    mt5_account_id=mt5_account_id,
+                    user_id=user_id,
                     broker_symbol=broker_symbol,
                     direction=normalized_direction,
                     execution_price=final_execution_price,
@@ -1655,6 +1665,8 @@ class MT5ExecutionService:
                 margin_required=margin_required,
                 free_margin=free_margin,
                 risk_amount=self._risk_amount(
+                    mt5_account_id=mt5_account_id,
+                    user_id=user_id,
                     broker_symbol=broker_symbol,
                     direction=normalized_direction,
                     execution_price=final_execution_price,
