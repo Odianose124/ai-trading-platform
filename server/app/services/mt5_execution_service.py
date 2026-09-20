@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 
@@ -1749,6 +1749,8 @@ class MT5ExecutionService:
             margin_required=margin_required,
             free_margin=free_margin,
             risk_amount=self._risk_amount(
+                mt5_account_id=mt5_account_id,
+                user_id=user_id,
                 broker_symbol=broker_symbol,
                 direction=normalized_direction,
                 execution_price=final_execution_price,
