@@ -104,15 +104,15 @@ class ExecutionPreviewService:
     Flow:
 
         Trade Setup
-            ↓
+            â†“
         Position Size
-            ↓
+            â†“
         Broker Validation
-            ↓
+            â†“
         Execution Preview
-            ↓
+            â†“
         Final Confirmation
-            ↓
+            â†“
         MT5 order_send()
     """
 
@@ -200,7 +200,7 @@ class ExecutionPreviewService:
         if symbol_info is None:
             return None
 
-        tick_size = Decimal(str(getattr(symbol_info, "trade_tick_size", 0) or 0))
+        tick_size = Decimal(str(symbol_info.get("trade_tick_size", 0) or 0))
         tick_value = Decimal(
             str(getattr(symbol_info, "trade_tick_value", 0) or 0)
         )
@@ -475,7 +475,7 @@ class ExecutionPreviewService:
             signal_price_deviation_percent=deviation_percent,
             spread=(
                 self._to_decimal(
-                    validation.spread,
+                    validation_data["market"]["spread"],
                     "spread",
                 )
                 if validation_data["market"]["spread"] is not None
@@ -483,7 +483,7 @@ class ExecutionPreviewService:
             ),
             spread_points=(
                 self._to_decimal(
-                    validation.spread_points,
+                    validation_data["market"]["spread_points"],
                     "spread_points",
                 )
                 if validation_data["market"]["spread_points"] is not None
@@ -491,7 +491,7 @@ class ExecutionPreviewService:
             ),
             margin_required=(
                 self._to_decimal(
-                    validation.margin_required,
+                    validation_data["margin_required"],
                     "margin_required",
                 )
                 if validation_data["margin_required"] is not None
@@ -499,7 +499,7 @@ class ExecutionPreviewService:
             ),
             free_margin=(
                 self._to_decimal(
-                    validation.free_margin,
+                    validation_data["free_margin"],
                     "free_margin",
                 )
                 if validation_data["free_margin"] is not None

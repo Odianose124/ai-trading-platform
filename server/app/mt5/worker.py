@@ -56,6 +56,7 @@ class MT5AccountWorker:
                 "inside the MT5 worker process."
             ) from exc
 
+        self.mt5 = mt5
         self.runtime = runtime
         self._password = password
         self._terminal_process: subprocess.Popen[bytes] | None = None
@@ -753,7 +754,7 @@ class MT5AccountWorker:
         )
 
         validator = BrokerValidationService(
-            mt5_module=mt5,
+            mt5_module=self.mt5,
             connection=None,
         )
 

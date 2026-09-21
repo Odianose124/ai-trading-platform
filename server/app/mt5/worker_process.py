@@ -604,6 +604,7 @@ def _worker_process_entry(
             )
         except (BrokenPipeError, EOFError, OSError):
             pass
+        return
     finally:
         try:
             worker.stop()
@@ -1212,6 +1213,51 @@ class MT5WorkerProcess:
                 raise MT5WorkerProcessError(
                     "MT5 worker returned an invalid deal position ID."
                 ) from exc
+    def symbol_info(
+        self,
+        symbol: str,
+    ) -> dict[str, Any]:
+        """
+        Request symbol information from the account-specific MT5 worker.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            self._send_command(
+                {
+                    "action": "symbol_info",
+                    "symbol": symbol,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker symbol information request failed.",
+                    )
+                )
+
+            if response.get("type") != "symbol_info_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "symbol information response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid symbol information payload."
+                )
+
+            return result
+
     def validate_trade(
         self,
         *,
@@ -1421,4 +1467,6 @@ def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:
     return MT5WorkerProcess(runtime)
+
+
 

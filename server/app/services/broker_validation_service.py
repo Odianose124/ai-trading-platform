@@ -469,6 +469,7 @@ class BrokerValidationService:
         stop_loss: Any,
         take_profit: Any = None,
         volume: Any = None,
+        order_type: Any = None,
     ) -> BrokerValidationResult:
 
         checks: list[str] = []
@@ -1172,6 +1173,7 @@ class BrokerValidationService:
 
 
 broker_validation_service = BrokerValidationService()
+
 
 
 
