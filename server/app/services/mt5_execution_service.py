@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 
@@ -1347,30 +1347,47 @@ class MT5ExecutionService:
                 ),
             )
 
-        preflight_retcode = getattr(
-            preflight,
-            "retcode",
-            None,
+        preflight_retcode = (
+            preflight.get("retcode")
+            if isinstance(preflight, dict)
+            else getattr(preflight, "retcode", None)
         )
 
         preflight_retcode_description = str(
-            getattr(
-                preflight,
-                "retcode_description",
-                "",
+            (
+                preflight.get("retcode_description")
+                if isinstance(preflight, dict)
+                else getattr(
+                    preflight,
+                    "retcode_description",
+                    "",
+                )
             )
             or ""
         )
 
         preflight_comment = str(
-            getattr(preflight, "comment", "") or ""
+            (
+                preflight.get("comment")
+                if isinstance(preflight, dict)
+                else getattr(
+                    preflight,
+                    "comment",
+                    "",
+                )
+            )
+            or ""
         )
 
         preflight_accepted = bool(
-            getattr(
-                preflight,
-                "accepted",
-                False,
+            (
+                preflight.get("accepted", False)
+                if isinstance(preflight, dict)
+                else getattr(
+                    preflight,
+                    "accepted",
+                    False,
+                )
             )
         )
 
