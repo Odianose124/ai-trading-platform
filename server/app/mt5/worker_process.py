@@ -1450,6 +1450,57 @@ class MT5WorkerProcess:
                     "trade validation payload."
                 )
             return result
+    def order_check(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Run broker preflight validation through the account-specific
+        MT5 worker without submitting the order.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            if not isinstance(request, dict):
+                raise MT5WorkerProcessError(
+                    "The order check request must be an object."
+                )
+
+            self._send_command(
+                {
+                    "action": "order_check",
+                    "request": request,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker order check failed.",
+                    )
+                )
+
+            if response.get("type") != "order_check_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "order check response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "order check result."
+                )
+
+            return result
     def execute_order(
         self,
         request: dict[str, Any],
@@ -1608,6 +1659,7 @@ def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:
     return MT5WorkerProcess(runtime)
+
 
 
 
