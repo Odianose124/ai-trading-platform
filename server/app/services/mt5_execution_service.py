@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 
@@ -629,8 +629,8 @@ class MT5ExecutionService:
                 ),
             )
 
-        ask_price = Decimal(str(tick.ask))
-        bid_price = Decimal(str(tick.bid))
+        ask_price = Decimal(str(tick.get("ask", 0) or 0))
+        bid_price = Decimal(str(tick.get("bid", 0) or 0))
 
         if ask_price <= 0 or bid_price <= 0:
             return MT5ExecutionResult(
@@ -1220,9 +1220,9 @@ class MT5ExecutionService:
             final_execution_price = (
                 Decimal(
                     str(
-                        final_tick.ask
+                        final_tick.get("ask", 0)
                         if normalized_direction == "buy"
-                        else final_tick.bid
+                        else final_tick.get("bid", 0)
                     )
                 )
             )
@@ -1705,6 +1705,8 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
+
+
 
 
 

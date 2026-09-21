@@ -1258,6 +1258,147 @@ class MT5WorkerProcess:
 
             return result
 
+    def symbol_info_tick(
+        self,
+        symbol: str,
+    ) -> dict[str, Any]:
+        """
+        Request current symbol tick information from the
+        account-specific MT5 worker.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            self._send_command(
+                {
+                    "action": "symbol_info_tick",
+                    "symbol": symbol,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker symbol tick request failed.",
+                    )
+                )
+
+            if response.get("type") != "symbol_info_tick_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "symbol tick response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "symbol tick payload."
+                )
+
+            return result
+
+    def account_info(
+        self,
+    ) -> dict[str, Any]:
+        """
+        Request account information from the account-specific MT5 worker.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            self._send_command(
+                {
+                    "action": "account_info",
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker account information request failed.",
+                    )
+                )
+
+            if response.get("type") != "account_info_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "account information response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "account information payload."
+                )
+
+            return result
+    def order_calc_margin(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Request broker margin calculation from the account-specific
+        MT5 worker.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            if not isinstance(request, dict):
+                raise MT5WorkerProcessError(
+                    "The margin calculation request must be an object."
+                )
+
+            self._send_command(
+                {
+                    "action": "order_calc_margin",
+                    "request": request,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker margin calculation failed.",
+                    )
+                )
+
+            if response.get("type") != "order_calc_margin_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "margin calculation response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "margin calculation result."
+                )
+
+            return result
     def validate_trade(
         self,
         *,
@@ -1467,6 +1608,8 @@ def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:
     return MT5WorkerProcess(runtime)
+
+
 
 
 
