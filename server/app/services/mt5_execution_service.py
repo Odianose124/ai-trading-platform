@@ -215,8 +215,7 @@ class MT5ExecutionService:
 
         tick_size = Decimal(
             str(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "trade_tick_size",
                     0,
                 )
@@ -226,8 +225,7 @@ class MT5ExecutionService:
 
         tick_value = Decimal(
             str(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "trade_tick_value",
                     0,
                 )
@@ -254,8 +252,7 @@ class MT5ExecutionService:
         symbol_info: Any,
     ) -> str:
         filling_flags = int(
-            getattr(
-                symbol_info,
+            symbol_info.get(
                 "filling_mode",
                 0,
             )
@@ -661,13 +658,11 @@ class MT5ExecutionService:
 
         tick_size = Decimal(
             str(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "trade_tick_size",
                     0,
                 )
-                or getattr(
-                    symbol_info,
+                or symbol_info.get(
                     "point",
                     0,
                 )
@@ -853,8 +848,7 @@ class MT5ExecutionService:
 
         free_margin = Decimal(
             str(
-                getattr(
-                    account_info,
+                account_info.get(
                     "margin_free",
                     0,
                 )
@@ -1026,8 +1020,7 @@ class MT5ExecutionService:
         # ---------------------------------------------------------
 
         digits = int(
-            getattr(
-                symbol_info,
+            symbol_info.get(
                 "digits",
                 0,
             )
@@ -1036,8 +1029,7 @@ class MT5ExecutionService:
 
         broker_volume_min = Decimal(
             str(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "volume_min",
                     0,
                 )
@@ -1047,8 +1039,7 @@ class MT5ExecutionService:
 
         broker_volume_max = Decimal(
             str(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "volume_max",
                     0,
                 )
@@ -1058,8 +1049,7 @@ class MT5ExecutionService:
 
         broker_volume_step = Decimal(
             str(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "volume_step",
                     0,
                 )
@@ -1152,8 +1142,7 @@ class MT5ExecutionService:
             )
 
             trade_exemode = int(
-                getattr(
-                    symbol_info,
+                symbol_info.get(
                     "trade_exemode",
                     0,
                 )
@@ -1699,5 +1688,6 @@ class MT5ExecutionService:
 
 
 mt5_execution_service = MT5ExecutionService()
+
 
 

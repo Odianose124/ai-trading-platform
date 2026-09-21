@@ -1399,6 +1399,8 @@ class MT5AccountWorker:
             "volume_min": info.volume_min,
             "volume_max": info.volume_max,
             "volume_step": info.volume_step,
+            "filling_mode": info.filling_mode,
+            "trade_exemode": info.trade_exemode,
         }
 
     def symbol_info_tick(
