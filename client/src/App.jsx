@@ -31,6 +31,9 @@ import LoginPage from "./LoginPage.jsx";
 import RegisterPage from "./RegisterPage.jsx";
 import ManualTradePage from "./ManualTradePage.jsx";
 import PositionsPage from "./PositionsPage.jsx";
+import {
+  MT5WebSocketProvider,
+} from "./context/MT5WebSocketContext.jsx";
 import "./App.css";
 
 const navigation = [
@@ -240,6 +243,7 @@ function TradingApplication() {
   }, []);
 
   return (
+  <MT5WebSocketProvider>
     <div className="app-shell">
       <aside
         className={`sidebar ${
@@ -410,6 +414,7 @@ function TradingApplication() {
         </div>
       </main>
     </div>
+  </MT5WebSocketProvider>
   );
 }
 

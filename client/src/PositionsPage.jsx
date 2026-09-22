@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -15,6 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import api from "./services/api";
+import { useMT5WebSocket } from "./context/MT5WebSocketContext.jsx";
 
 function number(value, digits = 5) {
   if (
@@ -711,7 +712,7 @@ function PositionCard({
                     }}
                   >
                     {action.decision}
-                    {" · "}
+                    {" Â· "}
                     {dateTime(action.created_at)}
                   </span>
 
@@ -761,10 +762,17 @@ function buttonStyle(color) {
 }
 
 export default function PositionsPage() {
+  const {
+    positions: livePositions,
+    pendingOrders: livePendingOrders,
+    summary: liveSummary,
+    ticks: liveTicks,
+    connected: mt5Connected,
+  } = useMT5WebSocket();
   const [positions, setPositions] = useState([]);
   const [pendingOrders, setPendingOrders] =
     useState([]);
-  const [ticks, setTicks] = useState({});
+
   const [summary, setSummary] = useState({
     open_trades: 0,
     total_volume: 0,
@@ -841,29 +849,38 @@ export default function PositionsPage() {
     [],
   );
 
-  const loadTick = useCallback(
-    async (symbol) => {
-      try {
-        const response = await api.get(
-          `/api/mt5/market-data/tick/${encodeURIComponent(
-            symbol,
-          )}`,
-        );
+  useEffect(() => {
+    if (!livePositions) {
+      return;
+    }
 
-        setTicks((current) => ({
-          ...current,
-          [symbol]: response.data,
-        }));
-      } catch {
-        setTicks((current) => ({
-          ...current,
-          [symbol]: current[symbol] || null,
-        }));
-      }
-    },
-    [],
-  );
+    setPositions(livePositions);
 
+    setPendingOrders(
+      livePendingOrders || [],
+    );
+
+    if (liveSummary) {
+      setSummary({
+        open_trades:
+          liveSummary.total_positions ?? 0,
+        total_volume:
+          liveSummary.total_volume ?? 0,
+        floating_profit:
+          liveSummary.floating_profit ?? 0,
+      });
+    }
+
+
+    setLoading(false);
+    setError("");
+
+  }, [
+    livePositions,
+    livePendingOrders,
+    liveSummary,
+    liveTicks,
+  ]);
   const loadActions = useCallback(
     async (ticket) => {
       updateManagement(ticket, {
@@ -964,51 +981,10 @@ export default function PositionsPage() {
   );
 
   useEffect(() => {
-    loadPositions();
-
-    const stateInterval = window.setInterval(
-      () => loadPositions(),
-      2000,
-    );
-
-    return () => {
-      window.clearInterval(stateInterval);
-    };
-  }, [loadPositions]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const refreshTicks = async () => {
-      if (cancelled) {
-        return;
-      }
-
-      const symbols = [
-        ...new Set(
-          positions.map(
-            (position) => position.symbol,
-          ),
-        ),
-      ];
-
-      await Promise.all(
-        symbols.map((symbol) => loadTick(symbol)),
-      );
-    };
-
-    refreshTicks();
-
-    const tickInterval = window.setInterval(
-      refreshTicks,
-      250,
-    );
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(tickInterval);
-    };
-  }, [positions, loadTick]);
+    if (!mt5Connected) {
+      setLoading(true);
+    }
+  }, [mt5Connected]);
 
   const floatingProfit = Number(
     summary.floating_profit || 0,
@@ -1278,7 +1254,7 @@ export default function PositionsPage() {
                     fontSize: 10,
                   }}
                 >
-                  Waiting for MT5 activation ·{" "}
+                  Waiting for MT5 activation Â·{" "}
                   {dateTime(order.placed_at)}
                 </div>
               </div>
@@ -1365,7 +1341,7 @@ export default function PositionsPage() {
               <PositionCard
                 key={position.ticket}
                 position={position}
-                tick={ticks[position.symbol]}
+                tick={liveTicks[position.symbol]}
                 management={
                   management[position.ticket]
                 }
@@ -1403,3 +1379,14 @@ export default function PositionsPage() {
     </section>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
