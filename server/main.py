@@ -1,4 +1,4 @@
-﻿from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
 import asyncio
 from datetime import datetime, timezone
 
@@ -139,6 +139,10 @@ from app.services.pending_order_monitor import (
     pending_order_monitor,
 )
 
+from app.websocket.mt5_stream import (
+    mt5_stream_service,
+)
+
 def build_mt5_realtime_snapshot(
     mt5_account_id: int,
     user_id: int,
@@ -244,31 +248,34 @@ MARKET_SYMBOLS = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Make sure all database tables exist before
-    # starting live market-data and trading services.
+
     create_database_tables()
 
-    # Start live market-data collection.
     await market_data_manager.start_background(
         MARKET_SYMBOLS
     )
 
-    # Start automatic SL/TP order monitoring.
     await live_order_monitor.start_background()
 
-    # Start pending-order reconciliation monitoring.
     await pending_order_monitor.start_background()
+
+
+    asyncio.create_task(
+        mt5_stream_service.start()
+    )
+
 
     yield
 
-    # Stop pending-order reconciliation monitoring.
+
     await pending_order_monitor.stop()
 
-    # Stop the live order monitor.
     await live_order_monitor.stop()
 
-    # Stop the market-data connection.
     await market_data_manager.stop()
+
+
+    mt5_stream_service.stop()
 
 
 app = FastAPI(
@@ -537,4 +544,8 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }
+
+
+
+
 
