@@ -1122,6 +1122,19 @@ class MT5ExecutionService:
         # BUILD MT5 REQUEST
         # ---------------------------------------------------------
 
+        trade_exemode = int(
+            symbol_info.get(
+                "trade_exemode",
+                0,
+            )
+            or 0
+        )
+
+        checks.append(
+            "MT5 symbol trade execution mode="
+            f"{trade_exemode}; worker will apply broker execution rules"
+        )
+
         if execution_mode == "pending":
             filling_mode = "RETURN"
             trade_action = "PENDING"
@@ -1139,19 +1152,6 @@ class MT5ExecutionService:
 
             checks.append(
                 "MT5 market-order request constructed"
-            )
-
-            trade_exemode = int(
-                symbol_info.get(
-                    "trade_exemode",
-                    0,
-                )
-                or 0
-            )
-
-            checks.append(
-                "MT5 symbol trade execution mode="
-                f"{trade_exemode}; worker will apply broker execution rules"
             )
 
         request = {
