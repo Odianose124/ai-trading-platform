@@ -1821,15 +1821,25 @@ class MT5AccountWorker:
         retcode = getattr(result, "retcode", None)
 
         accepted_retcodes = {
-            getattr(mt5, "TRADE_RETCODE_DONE", -999999),
-            getattr(mt5, "TRADE_RETCODE_PLACED", -999998),
-            getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", -999997),
-        }
+    getattr(mt5, "TRADE_RETCODE_DONE", -999999),
+    getattr(mt5, "TRADE_RETCODE_PLACED", -999998),
+    getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", -999997),
+    0,
+}
 
         return {
             "retcode": retcode,
             "retcode_description": self._retcode_description(retcode),
-            "accepted": retcode in accepted_retcodes,
+            "accepted": (
+    retcode in accepted_retcodes
+    or str(
+        getattr(result, "comment", "")
+    ).strip().lower()
+    in {
+        "done",
+        "check done",
+    }
+),
             "comment": getattr(result, "comment", None),
             "balance": getattr(result, "balance", None),
             "equity": getattr(result, "equity", None),

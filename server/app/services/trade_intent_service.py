@@ -88,7 +88,7 @@ class TradeIntentResult:
 
 
 class TradeIntentService:
-    INTENT_VALIDITY_SECONDS = 60
+    INTENT_VALIDITY_SECONDS = 900
     DEFAULT_MAX_RISK_PERCENT = Decimal("2")
 
     def _to_decimal(self, value, field_name: str) -> Decimal:
