@@ -202,8 +202,8 @@ class ExecutionPreviewService:
 
         tick_size = Decimal(str(symbol_info.get("trade_tick_size", 0) or 0))
         tick_value = Decimal(
-            str(getattr(symbol_info, "trade_tick_value", 0) or 0)
-        )
+        str(symbol_info.get("trade_tick_value", 0) or 0)
+    )
 
         if tick_size <= 0 or tick_value <= 0:
             return None
