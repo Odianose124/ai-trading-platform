@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 import multiprocessing
 from datetime import datetime
 from multiprocessing.connection import Connection
@@ -401,6 +401,7 @@ def _worker_process_entry(
                 stop_loss = command.get("stop_loss")
                 take_profit = command.get("take_profit")
                 order_type = command.get("order_type")
+
                 if not isinstance(symbol, str) or not symbol.strip():
                     connection.send(
                         {
@@ -409,6 +410,7 @@ def _worker_process_entry(
                         }
                     )
                     continue
+
                 if not isinstance(direction, str) or not direction.strip():
                     connection.send(
                         {
@@ -417,18 +419,30 @@ def _worker_process_entry(
                         }
                     )
                     continue
+
+                try:
+                    result = worker.validate_trade(
+                        symbol=symbol,
+                        direction=direction,
+                        volume=volume,
+                        entry_price=entry_price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        order_type=order_type,
+                    )
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
                 connection.send(
                     {
                         "type": "trade_validation",
-                        "result": worker.validate_trade(
-                            symbol=symbol,
-                            direction=direction,
-                            volume=volume,
-                            entry_price=entry_price,
-                            stop_loss=stop_loss,
-                            take_profit=take_profit,
-                            order_type=order_type,
-                        ),
+                        "result": result,
                     }
                 )
                 continue
