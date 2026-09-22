@@ -199,6 +199,7 @@ export function MT5WebSocketProvider({
               "mt5_error"
           ) {
             const messageError =
+              message?.detail ||
               message?.error ||
               message?.message ||
               "MT5 WebSocket error.";
@@ -339,3 +340,4 @@ export function useMT5WebSocket() {
 
   return context;
 }
+
