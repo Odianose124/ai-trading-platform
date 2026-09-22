@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import subprocess
@@ -1371,6 +1371,94 @@ class MT5AccountWorker:
     # BROKER INFORMATION HELPERS
     # ------------------------------------------------------------------
 
+    def resolve_symbol(
+        self,
+        symbol: str,
+    ) -> dict[str, Any]:
+        """
+        Resolve a platform symbol to the actual broker symbol
+        available inside this account's isolated MT5 terminal.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        requested_symbol = str(
+            symbol or ""
+        ).strip().upper()
+
+        if not requested_symbol:
+            raise MT5WorkerError(
+                "MT5 symbol is required."
+            )
+
+        symbols = mt5.symbols_get()
+
+        if symbols is None:
+            raise MT5WorkerError(
+                "Unable to discover MT5 symbols: "
+                f"{mt5.last_error()}"
+            )
+
+        exact_match = None
+
+        for item in symbols:
+            item_name = str(
+                getattr(item, "name", "")
+            ).strip()
+
+            if item_name.upper() == requested_symbol:
+                exact_match = item_name
+                break
+
+        if exact_match:
+            return {
+                "requested_symbol": requested_symbol,
+                "broker_symbol": exact_match,
+            }
+
+        candidates = []
+
+        for item in symbols:
+            item_name = str(
+                getattr(item, "name", "")
+            ).strip()
+
+            if not item_name:
+                continue
+
+            upper_name = item_name.upper()
+
+            if (
+                upper_name.startswith(requested_symbol)
+                or requested_symbol in upper_name
+            ):
+                candidates.append(item_name)
+
+        if not candidates:
+            raise MT5WorkerError(
+                "Unable to resolve MT5 broker symbol "
+                f"for requested symbol {requested_symbol}."
+            )
+
+        candidates.sort(
+            key=lambda value: (
+                0
+                if value.upper().startswith(
+                    requested_symbol
+                )
+                else 1,
+                len(value),
+                value.upper(),
+            )
+        )
+
+        return {
+            "requested_symbol": requested_symbol,
+            "broker_symbol": candidates[0],
+        }
     def symbol_info(
         self,
         symbol: str,

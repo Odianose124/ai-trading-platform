@@ -1,4 +1,4 @@
-﻿import {
+import {
   createContext,
   useContext,
   useEffect,
@@ -192,6 +192,29 @@ export function MT5WebSocketProvider({
             return;
           }
 
+
+          if (
+            message?.type ===
+            "mt5_tick"
+          ) {
+            setSnapshot((current) => {
+
+              if (!current) {
+                return current;
+              }
+
+              return {
+                ...current,
+                ticks: {
+                  ...(current.ticks || {}),
+                  ...(message.data || {}),
+                },
+              };
+            });
+
+            return;
+          }
+
           if (
             message?.type ===
               "mt5_snapshot_error" ||
@@ -340,4 +363,5 @@ export function useMT5WebSocket() {
 
   return context;
 }
+
 

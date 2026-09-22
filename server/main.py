@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+﻿from contextlib import asynccontextmanager
 import asyncio
 from datetime import datetime, timezone
 
@@ -143,6 +143,10 @@ from app.websocket.mt5_stream import (
     mt5_stream_service,
 )
 
+from app.websocket.manager import (
+    websocket_manager,
+)
+
 def build_mt5_realtime_snapshot(
     mt5_account_id: int,
     user_id: int,
@@ -246,7 +250,49 @@ MARKET_SYMBOLS = [
 ]
 
 
-@asynccontextmanager
+
+mt5_realtime_publisher_task = None
+
+
+async def mt5_realtime_publisher():
+
+    while True:
+
+        db = SessionLocal()
+
+        try:
+
+            accounts = (
+                db.query(MT5TradingAccount)
+                .filter(
+                    MT5TradingAccount.is_active.is_(True)
+                )
+                .all()
+            )
+
+            for account in accounts:
+
+                try:
+
+                    snapshot = await asyncio.to_thread(
+                        build_mt5_realtime_snapshot,
+                        account.id,
+                        account.user_id,
+                    )
+
+                    await mt5_stream_service.publish_snapshot(
+                        snapshot
+                    )
+
+                except Exception:
+                    continue
+
+        finally:
+            db.close()
+
+        await asyncio.sleep(1)
+
+
 async def lifespan(app: FastAPI):
 
     create_database_tables()
@@ -265,6 +311,13 @@ async def lifespan(app: FastAPI):
     )
 
 
+    global mt5_realtime_publisher_task
+
+    mt5_realtime_publisher_task = asyncio.create_task(
+        mt5_realtime_publisher()
+    )
+
+
     yield
 
 
@@ -273,6 +326,16 @@ async def lifespan(app: FastAPI):
     await live_order_monitor.stop()
 
     await market_data_manager.stop()
+
+
+    if mt5_realtime_publisher_task:
+        mt5_realtime_publisher_task.cancel()
+
+    try:
+        if mt5_realtime_publisher_task:
+            await mt5_realtime_publisher_task
+    except asyncio.CancelledError:
+        pass
 
 
     mt5_stream_service.stop()
@@ -290,7 +353,9 @@ async def mt5_realtime_websocket(
     websocket: WebSocket,
     token: str | None = None,
 ):
-    await websocket.accept()
+    await websocket_manager.connect(
+        websocket
+    )
 
     if not token:
         await websocket.send_json(
@@ -369,35 +434,23 @@ async def mt5_realtime_websocket(
             await websocket.close(code=1008)
             return
 
+        # MT5 snapshots are now pushed by
+        # mt5_realtime_publisher through
+        # websocket_manager.broadcast().
+        # This websocket only stays connected.
+
         while True:
-            try:
-                snapshot = await asyncio.to_thread(
-                    build_mt5_realtime_snapshot,
-                    account.id,
-                    user_id,
-                )
-
-                await websocket.send_json(snapshot)
-
-            except MT5WorkerManagerError as exc:
-                await websocket.send_json(
-                    {
-                        "type": "mt5_snapshot_error",
-                        "timestamp": datetime.now(
-                            timezone.utc
-                        ).isoformat(),
-                        "mt5_account_id": account.id,
-                        "user_id": user_id,
-                        "detail": str(exc),
-                    }
-                )
-
-            await asyncio.sleep(1)
+            await asyncio.sleep(3600)
 
     except WebSocketDisconnect:
         pass
 
     finally:
+
+        await websocket_manager.disconnect(
+            websocket
+        )
+
         if db is not None:
             db.close()
 
@@ -544,6 +597,11 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }
+
+
+
+
+
 
 
 

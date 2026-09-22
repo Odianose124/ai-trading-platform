@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-from asyncio import sleep
+import asyncio
 from datetime import datetime, timezone
 
 from app.websocket.manager import websocket_manager
@@ -8,15 +8,35 @@ from app.websocket.manager import websocket_manager
 
 class MT5StreamService:
     """
-    Publishes real MT5 market updates.
+    Publishes live MT5 websocket events.
 
-    No hardcoded prices.
-    No simulated ticks.
+    Data source:
+    MT5 worker manager.
+
+    No simulated prices.
+    No hardcoded symbols.
     """
-
 
     def __init__(self):
         self.running = False
+        self.task = None
+        self.event_queue = asyncio.Queue()
+
+
+    async def publish_snapshot(
+        self,
+        snapshot: dict,
+    ):
+
+        await self.event_queue.put(
+            {
+                "type": "mt5_snapshot",
+                "timestamp": datetime.now(
+                    timezone.utc
+                ).isoformat(),
+                **snapshot,
+            }
+        )
 
 
     async def publish_tick(
@@ -24,7 +44,7 @@ class MT5StreamService:
         tick: dict,
     ):
 
-        await websocket_manager.broadcast(
+        await self.event_queue.put(
             {
                 "type": "mt5_tick",
                 "source": "MetaTrader 5",
@@ -42,17 +62,17 @@ class MT5StreamService:
 
         while self.running:
 
-            # MT5 worker integration will feed this.
-            # This loop remains idle until real
-            # worker tick events are connected.
+            event = await self.event_queue.get()
 
-            await sleep(1)
+            await websocket_manager.broadcast(
+                event
+            )
 
 
-    def stop(self):
+    async def stop(self):
 
         self.running = False
 
 
-
 mt5_stream_service = MT5StreamService()
+
