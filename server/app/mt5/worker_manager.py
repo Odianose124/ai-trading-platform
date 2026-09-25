@@ -701,6 +701,47 @@ class MT5WorkerManager:
                     f"Unable to execute order for account "
                     f"{mt5_account_id}: {exc}"
                 ) from exc
+    def market_watch_ticks(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Return live Market Watch ticks from the user's
+        account-isolated MT5 worker.
+        """
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(
+                mt5_account_id
+            )
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.market_watch_ticks()
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to read live MT5 Market Watch "
+                    f"for account {mt5_account_id}: {exc}"
+                ) from exc
     def symbol_info(
         self,
         mt5_account_id: int,
@@ -764,4 +805,5 @@ class MT5WorkerManager:
                         account_id
                     )
 mt5_worker_manager = MT5WorkerManager()
+
 

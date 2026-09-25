@@ -199,28 +199,39 @@ def build_mt5_realtime_snapshot(
         if position.get("type") == "sell"
     )
 
-    symbols = {
-        str(position.get("symbol")).strip().upper()
+    ticks = mt5_worker_manager.market_watch_ticks(
+        mt5_account_id=mt5_account_id,
+        user_id=user_id,
+    )
+
+    position_symbols = {
+        str(position.get("symbol")).strip()
         for position in positions
         if position.get("symbol")
     }
 
-    symbols.update(
-        str(order.get("symbol")).strip().upper()
+    pending_order_symbols = {
+        str(order.get("symbol")).strip()
         for order in pending_orders
         if order.get("symbol")
-    )
+    }
 
-    ticks: dict[str, dict] = {}
+    for symbol in sorted(
+        position_symbols | pending_order_symbols
+    ):
+        if symbol in ticks:
+            continue
 
-    for symbol in sorted(symbols):
-        tick = mt5_worker_manager.symbol_info_tick(
-            mt5_account_id=mt5_account_id,
-            user_id=user_id,
-            symbol=symbol,
-        )
-
-        ticks[symbol] = tick
+        try:
+            ticks[symbol] = (
+                mt5_worker_manager.symbol_info_tick(
+                    mt5_account_id=mt5_account_id,
+                    user_id=user_id,
+                    symbol=symbol,
+                )
+            )
+        except MT5WorkerManagerError:
+            continue
 
     return {
         "type": "mt5_snapshot",
@@ -618,6 +629,7 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }
+
 
 
 

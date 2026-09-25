@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import multiprocessing
 from datetime import datetime
 from multiprocessing.connection import Connection
@@ -500,6 +500,25 @@ def _worker_process_entry(
                 connection.send(
                     {
                         "type": "order_result",
+                        "result": result,
+                    }
+                )
+                continue
+            if action == "market_watch_ticks":
+                try:
+                    result = worker.market_watch_ticks()
+                except Exception as exc:
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+
+                connection.send(
+                    {
+                        "type": "market_watch_ticks_result",
                         "result": result,
                     }
                 )
@@ -1227,6 +1246,50 @@ class MT5WorkerProcess:
                 raise MT5WorkerProcessError(
                     "MT5 worker returned an invalid deal position ID."
                 ) from exc
+    def market_watch_ticks(
+        self,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Request live Market Watch ticks from this account's
+        dedicated MT5 worker process.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            self._send_command(
+                {
+                    "action": "market_watch_ticks",
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 worker Market Watch request failed.",
+                    )
+                )
+
+            if response.get("type") != "market_watch_ticks_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "Market Watch response."
+                )
+
+            result = response.get("result")
+
+            if not isinstance(result, dict):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "Market Watch tick payload."
+                )
+
+            return result
     def symbol_info(
         self,
         symbol: str,
@@ -1673,6 +1736,7 @@ def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:
     return MT5WorkerProcess(runtime)
+
 
 
 

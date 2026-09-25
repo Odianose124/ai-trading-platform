@@ -33,7 +33,8 @@ import ManualTradePage from "./ManualTradePage.jsx";
 import PositionsPage from "./PositionsPage.jsx";
 import {
   MT5WebSocketProvider,
-} from "./context/MT5WebSocketContext.jsx";
+  useMT5WebSocket,
+} from "./context/MT5WebSocketContext";
 import "./App.css";
 
 const navigation = [
@@ -493,6 +494,11 @@ function AccountMetric({
   );
 }
 function CommandCenter() {
+  const {
+    account: realtimeAccount,
+    summary: realtimeSummary,
+  } = useMT5WebSocket();
+
   const [prices, setPrices] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [mtf, setMtf] = useState(null);
@@ -645,7 +651,7 @@ function CommandCenter() {
   );
 
   const account =
-    accountStatus?.account || {};
+    realtimeAccount || {};
 
   const accountBalance =
     account.balance ?? null;
@@ -654,23 +660,20 @@ function CommandCenter() {
     account.equity ?? null;
 
   const accountFreeMargin =
-    account.free_margin ?? null;
+    account.margin_free ?? null;
 
   const accountMargin =
     account.margin ?? null;
 
   const accountMarginLevel =
-    accountMargin && Number(accountMargin) > 0
-      ? (Number(accountEquity || 0) / Number(accountMargin)) * 100
-      : null;
+    account.margin_level ?? null;
 
   const openPositions =
-    positionSummary?.open_trades ??
-    positionSummary?.count ??
+    realtimeSummary?.total_positions ??
     0;
 
   const floatingProfit =
-    positionSummary?.floating_profit ??
+    realtimeSummary?.floating_profit ??
     0;
 
   return (

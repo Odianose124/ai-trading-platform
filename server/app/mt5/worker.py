@@ -1459,6 +1459,67 @@ class MT5AccountWorker:
             "requested_symbol": requested_symbol,
             "broker_symbol": candidates[0],
         }
+    def market_watch_ticks(
+        self,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Read live ticks from symbols available to this account's
+        isolated MT5 terminal.
+
+        The symbols are obtained directly from this worker's MT5
+        terminal. No application-level symbol list is used.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        symbols = self.mt5.symbols_get()
+
+        if symbols is None:
+            raise MT5WorkerError(
+                "Unable to read MT5 Market Watch symbols: "
+                f"{self.mt5.last_error()}"
+            )
+
+        ticks: dict[str, dict[str, Any]] = {}
+
+        for symbol_info in symbols:
+            symbol = getattr(
+                symbol_info,
+                "name",
+                None,
+            )
+
+            if not symbol:
+                continue
+
+            try:
+                tick = self.mt5.symbol_info_tick(symbol)
+            except Exception:
+                continue
+
+            if tick is None:
+                continue
+
+            bid = getattr(tick, "bid", None)
+            ask = getattr(tick, "ask", None)
+            last = getattr(tick, "last", None)
+            tick_time = getattr(tick, "time", None)
+
+            if bid is None and ask is None and last is None:
+                continue
+
+            ticks[symbol] = {
+                "symbol": symbol,
+                "bid": bid,
+                "ask": ask,
+                "last": last,
+                "time": tick_time,
+            }
+
+        return ticks
     def symbol_info(
         self,
         symbol: str,
@@ -2134,6 +2195,7 @@ class MT5AccountWorker:
             ),
             "last_error": mt5.last_error(),
         }
+
 
 
 

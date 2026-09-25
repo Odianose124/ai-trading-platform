@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, RefreshCw } from "lucide-react";
 import api from "./services/api";
+import { useMT5WebSocket } from "./context/MT5WebSocketContext";
 import "./markets.css";
 
 const SYMBOLS = ["XAUUSD", "BTCUSD", "EURUSD"];
@@ -133,93 +134,94 @@ function normalizeTick(tick, requestedSymbol = "") {
   };
 }
 
-function extractTicks(data) {
-  /*
-   * Backend response:
-   *
-   * {
-   *   source: "MetaTrader 5",
-   *   prices: {
-   *     XAUUSD: {...},
-   *     BTCUSD: {...},
-   *     EURUSD: {...}
-   *   }
-   * }
-   *
-   * The frontend therefore converts prices into:
-   *
-   * {
-   *   XAUUSD: {...},
-   *   BTCUSD: {...},
-   *   EURUSD: {...}
-   * }
-   */
+function normalizeSymbol(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
 
-  const prices = data?.prices;
-
+function findRealtimeTick(ticks, requestedSymbol) {
   if (
-    prices &&
-    typeof prices === "object" &&
-    !Array.isArray(prices)
+    !ticks ||
+    typeof ticks !== "object" ||
+    !requestedSymbol
   ) {
-    return Object.entries(prices).reduce(
-      (result, [requestedSymbol, tick]) => {
-        result[requestedSymbol] = normalizeTick(
-          tick,
-          requestedSymbol,
+    return null;
+  }
+
+  const requested = normalizeSymbol(
+    requestedSymbol,
+  );
+
+  if (!requested) {
+    return null;
+  }
+
+  const entries = Object.entries(ticks);
+
+  const exactMatch = entries.find(
+    ([key, tick]) => {
+      const candidates = [
+        key,
+        tick?.symbol,
+        tick?.name,
+        tick?.mt5_symbol,
+        tick?.broker_symbol,
+        tick?.brokerSymbol,
+        tick?.requested_symbol,
+      ];
+
+      return candidates.some(
+        (candidate) =>
+          normalizeSymbol(candidate) ===
+          requested,
+      );
+    },
+  );
+
+  if (exactMatch) {
+    return normalizeTick(
+      exactMatch[1],
+      requestedSymbol,
+    );
+  }
+
+  const relatedMatch = entries.find(
+    ([key, tick]) => {
+      const candidates = [
+        key,
+        tick?.symbol,
+        tick?.name,
+        tick?.mt5_symbol,
+        tick?.broker_symbol,
+        tick?.brokerSymbol,
+      ];
+
+      return candidates.some((candidate) => {
+        const normalizedCandidate =
+          normalizeSymbol(candidate);
+
+        return (
+          normalizedCandidate &&
+          (normalizedCandidate.startsWith(
+            requested,
+          ) ||
+            normalizedCandidate.endsWith(
+              requested,
+            ))
         );
+      });
+    },
+  );
 
-        return result;
-      },
-      {},
-    );
+  if (!relatedMatch) {
+    return null;
   }
 
-  if (Array.isArray(data)) {
-    return data.reduce((result, tick) => {
-      const normalized = normalizeTick(tick);
-
-      if (normalized.symbol) {
-        result[normalized.symbol] = normalized;
-      }
-
-      return result;
-    }, {});
-  }
-
-  if (Array.isArray(data?.ticks)) {
-    return data.ticks.reduce(
-      (result, tick) => {
-        const normalized = normalizeTick(tick);
-
-        if (normalized.symbol) {
-          result[normalized.symbol] =
-            normalized;
-        }
-
-        return result;
-      },
-      {},
-    );
-  }
-
-  if (Array.isArray(data?.data)) {
-    return data.data.reduce(
-      (result, tick) => {
-        const normalized = normalizeTick(tick);
-
-        if (normalized.symbol) {
-          result[normalized.symbol] =
-            normalized;
-        }
-
-        return result;
-      },
-      {},
-    );
-  }
-
-  return {};
+  return normalizeTick(
+    relatedMatch[1],
+    requestedSymbol,
+  );
 }
 
 function normalizeCandle(candle) {
@@ -343,7 +345,7 @@ function CandleChart({ candles }) {
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label="Live candlestick market chart"
+      aria-label="Market candlestick chart"
     >
       <line
         x1={padding.left}
@@ -446,6 +448,7 @@ function MarketTickerCard({
   tick,
   selected,
   onSelect,
+  live,
 }) {
   return (
     <button
@@ -468,7 +471,8 @@ function MarketTickerCard({
 
         <span className="live-pill">
           <span />
-          LIVE
+
+          {live ? "LIVE" : "OFFLINE"}
         </span>
       </div>
 
@@ -524,7 +528,13 @@ function MarketStat({
 }
 
 export default function MarketsPage() {
-  const [ticks, setTicks] = useState({});
+  const {
+    connected: websocketConnected,
+    ticks: realtimeTicks,
+    timestamp: realtimeTimestamp,
+    error: websocketError,
+  } = useMT5WebSocket();
+
   const [candles, setCandles] =
     useState([]);
 
@@ -543,16 +553,38 @@ export default function MarketsPage() {
   const [error, setError] =
     useState("");
 
-  const [lastUpdated, setLastUpdated] =
-    useState(null);
+  const [
+    candleLastUpdated,
+    setCandleLastUpdated,
+  ] = useState(null);
+
+  const ticks = useMemo(() => {
+    return SYMBOLS.reduce(
+      (result, symbol) => {
+        const tick = findRealtimeTick(
+          realtimeTicks,
+          symbol,
+        );
+
+        if (tick) {
+          result[symbol] = tick;
+        }
+
+        return result;
+      },
+      {},
+    );
+  }, [realtimeTicks]);
 
   const selectedTick = useMemo(
-    () => ticks[selectedSymbol] || null,
+    () =>
+      ticks[selectedSymbol] || null,
     [ticks, selectedSymbol],
   );
 
   const latestCandle =
-    candles[candles.length - 1] || null;
+    candles[candles.length - 1] ||
+    null;
 
   const previousCandle =
     candles.length > 1
@@ -577,27 +609,14 @@ export default function MarketsPage() {
       try {
         setError("");
 
-        const [
-          tickResponse,
-          candleResponse,
-        ] = await Promise.all([
-          api.get(
-            "/api/mt5/market-data/ticks",
-          ),
-
-          api.get(
+        const candleResponse =
+          await api.get(
             `/api/mt5/market-data/candles/${selectedSymbol}/${timeframe}`,
             {
               params: {
                 limit: 500,
               },
             },
-          ),
-        ]);
-
-        const normalizedTicks =
-          extractTicks(
-            tickResponse?.data,
           );
 
         const normalizedCandles =
@@ -605,14 +624,14 @@ export default function MarketsPage() {
             candleResponse?.data,
           );
 
-        setTicks(normalizedTicks);
-
         setCandles(normalizedCandles);
 
-        setLastUpdated(new Date());
+        setCandleLastUpdated(
+          new Date(),
+        );
       } catch (requestError) {
         console.error(
-          "Unable to load MT5 market data:",
+          "Unable to load MT5 candle data:",
           requestError,
         );
 
@@ -620,7 +639,7 @@ export default function MarketsPage() {
           requestError?.response?.data
             ?.detail ||
           requestError?.message ||
-          "Unable to load live market data.";
+          "Unable to load market candle data.";
 
         setError(message);
       } finally {
@@ -634,14 +653,17 @@ export default function MarketsPage() {
   useEffect(() => {
     loadMarketData();
 
-    const interval =
-      window.setInterval(() => {
-        loadMarketData();
-      }, 5000);
-
-    return () =>
-      window.clearInterval(interval);
+    return () => {};
   }, [loadMarketData]);
+
+  const liveFeedTime =
+    realtimeTimestamp ||
+    selectedTick?.timestamp ||
+    null;
+
+  const feedError =
+    websocketError ||
+    error;
 
   return (
     <section className="page">
@@ -689,27 +711,31 @@ export default function MarketsPage() {
           </strong>
 
           <span>
-            Real-time bid/ask and candle data
-            from the connected trading terminal.
+            Bid/ask prices are received from
+            the connected account-isolated
+            MT5 live feed.
           </span>
         </div>
 
         <span className="live-source-time">
-          {lastUpdated
+          {websocketConnected &&
+          liveFeedTime
             ? `Updated ${formatTime(
-                lastUpdated,
+                liveFeedTime,
               )}`
-            : "Connecting..."}
+            : websocketConnected
+              ? "Live feed connected"
+              : "Connecting..."}
         </span>
       </div>
 
-      {error && (
+      {feedError && (
         <div className="error-banner">
           <strong>
-            Market data error
+            Market data connection
           </strong>
 
-          <span>{error}</span>
+          <span>{feedError}</span>
         </div>
       )}
 
@@ -735,6 +761,12 @@ export default function MarketsPage() {
               }
               onSelect={
                 setSelectedSymbol
+              }
+              live={
+                websocketConnected &&
+                Boolean(
+                  ticks[symbol],
+                )
               }
             />
           );
@@ -807,7 +839,7 @@ export default function MarketsPage() {
               />
 
               <span>
-                Loading live candles...
+                Loading market candles...
               </span>
             </div>
           ) : (
@@ -856,6 +888,15 @@ export default function MarketsPage() {
             value={candles.length}
           />
         </div>
+
+        {candleLastUpdated && (
+          <div className="market-terminal-time">
+            Candle history updated{" "}
+            {formatTime(
+              candleLastUpdated,
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
