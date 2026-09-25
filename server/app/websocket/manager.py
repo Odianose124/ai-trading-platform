@@ -8,61 +8,77 @@ class WebSocketManager:
     """
     Manages connected frontend websocket clients.
 
+    Connections are isolated by authenticated user_id.
+
     This layer only transports live data.
     It does not create MT5 connections.
     """
 
     def __init__(self):
-        self.connections: list[WebSocket] = []
+        self.connections: dict[int, set[WebSocket]] = {}
         self.lock = Lock()
-
 
     async def connect(
         self,
         websocket: WebSocket,
+        user_id: int,
     ):
         await websocket.accept()
 
         async with self.lock:
-            self.connections.append(websocket)
-
+            user_connections = self.connections.setdefault(
+                user_id,
+                set(),
+            )
+            user_connections.add(websocket)
 
     async def disconnect(
         self,
         websocket: WebSocket,
+        user_id: int,
     ):
         async with self.lock:
-            if websocket in self.connections:
-                self.connections.remove(websocket)
+            user_connections = self.connections.get(user_id)
 
+            if user_connections is None:
+                return
 
-    async def broadcast(
+            user_connections.discard(websocket)
+
+            if not user_connections:
+                self.connections.pop(
+                    user_id,
+                    None,
+                )
+
+    async def send_to_user(
         self,
+        user_id: int,
         message: dict,
     ):
         async with self.lock:
+            user_connections = self.connections.get(user_id)
 
-            disconnected = []
+            if not user_connections:
+                return
 
-            for websocket in self.connections:
+            disconnected: list[WebSocket] = []
 
+            for websocket in list(user_connections):
                 try:
-                    await websocket.send_json(
-                        message
-                    )
+                    await websocket.send_json(message)
 
                 except Exception:
-                    disconnected.append(
-                        websocket
-                    )
-
+                    disconnected.append(websocket)
 
             for websocket in disconnected:
+                user_connections.discard(websocket)
 
-                if websocket in self.connections:
-                    self.connections.remove(
-                        websocket
-                    )
+            if not user_connections:
+                self.connections.pop(
+                    user_id,
+                    None,
+                )
 
 
 websocket_manager = WebSocketManager()

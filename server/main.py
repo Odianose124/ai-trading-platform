@@ -252,6 +252,7 @@ MARKET_SYMBOLS = [
 
 
 mt5_realtime_publisher_task = None
+mt5_stream_task = None
 
 
 async def mt5_realtime_publisher():
@@ -281,7 +282,8 @@ async def mt5_realtime_publisher():
                     )
 
                     await mt5_stream_service.publish_snapshot(
-                        snapshot
+                        user_id=account.user_id,
+                        snapshot=snapshot,
                     )
 
                 except Exception:
@@ -306,12 +308,15 @@ async def lifespan(app: FastAPI):
     await pending_order_monitor.start_background()
 
 
-    asyncio.create_task(
+    global mt5_realtime_publisher_task
+
+    global mt5_stream_task
+
+    mt5_stream_task = asyncio.create_task(
         mt5_stream_service.start()
     )
 
-
-    global mt5_realtime_publisher_task
+    mt5_realtime_publisher_task
 
     mt5_realtime_publisher_task = asyncio.create_task(
         mt5_realtime_publisher()
@@ -338,7 +343,13 @@ async def lifespan(app: FastAPI):
         pass
 
 
-    mt5_stream_service.stop()
+    await mt5_stream_service.stop()
+
+    if mt5_stream_task:
+        try:
+            await mt5_stream_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -353,23 +364,23 @@ async def mt5_realtime_websocket(
     websocket: WebSocket,
     token: str | None = None,
 ):
-    await websocket_manager.connect(
-        websocket
-    )
-
-    if not token:
-        await websocket.send_json(
-            {
-                "type": "mt5_error",
-                "detail": "Authentication token is required.",
-            }
-        )
-        await websocket.close(code=1008)
-        return
-
     db: Session | None = None
+    user_id: int | None = None
 
     try:
+        if not token:
+            await websocket.accept()
+
+            await websocket.send_json(
+                {
+                    "type": "mt5_error",
+                    "detail": "Authentication token is required.",
+                }
+            )
+
+            await websocket.close(code=1008)
+            return
+
         try:
             payload = jwt.decode(
                 token,
@@ -385,12 +396,15 @@ async def mt5_realtime_websocket(
             user_id = int(user_id_raw)
 
         except (JWTError, ValueError, TypeError):
+            await websocket.accept()
+
             await websocket.send_json(
                 {
                     "type": "mt5_error",
                     "detail": "Could not validate credentials.",
                 }
             )
+
             await websocket.close(code=1008)
             return
 
@@ -403,12 +417,15 @@ async def mt5_realtime_websocket(
         )
 
         if user is None or not user.is_active:
+            await websocket.accept()
+
             await websocket.send_json(
                 {
                     "type": "mt5_error",
                     "detail": "User account is inactive or unavailable.",
                 }
             )
+
             await websocket.close(code=1008)
             return
 
@@ -422,6 +439,8 @@ async def mt5_realtime_websocket(
         )
 
         if account is None:
+            await websocket.accept()
+
             await websocket.send_json(
                 {
                     "type": "mt5_error",
@@ -431,13 +450,14 @@ async def mt5_realtime_websocket(
                     ),
                 }
             )
+
             await websocket.close(code=1008)
             return
 
-        # MT5 snapshots are now pushed by
-        # mt5_realtime_publisher through
-        # websocket_manager.broadcast().
-        # This websocket only stays connected.
+        await websocket_manager.connect(
+            websocket=websocket,
+            user_id=user_id,
+        )
 
         while True:
             await asyncio.sleep(3600)
@@ -446,10 +466,11 @@ async def mt5_realtime_websocket(
         pass
 
     finally:
-
-        await websocket_manager.disconnect(
-            websocket
-        )
+        if user_id is not None:
+            await websocket_manager.disconnect(
+                websocket=websocket,
+                user_id=user_id,
+            )
 
         if db is not None:
             db.close()
@@ -597,6 +618,7 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }
+
 
 
 
