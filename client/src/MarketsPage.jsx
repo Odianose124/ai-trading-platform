@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, RefreshCw } from "lucide-react";
 import api from "./services/api";
 import { useMT5WebSocket } from "./context/MT5WebSocketContext";
@@ -533,10 +533,15 @@ export default function MarketsPage() {
     ticks: realtimeTicks,
     timestamp: realtimeTimestamp,
     error: websocketError,
+    subscribeTicks,
   } = useMT5WebSocket();
 
   const [candles, setCandles] =
     useState([]);
+
+  useEffect(() => {
+    subscribeTicks(SYMBOLS);
+  }, [subscribeTicks]);
 
   const [selectedSymbol, setSelectedSymbol] =
     useState("XAUUSD");

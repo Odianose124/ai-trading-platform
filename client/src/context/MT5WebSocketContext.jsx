@@ -1,5 +1,6 @@
-import {
+﻿import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -50,6 +51,61 @@ export function MT5WebSocketProvider({
   );
   const [snapshot, setSnapshot] = useState(null);
   const [error, setError] = useState(null);
+
+  const requestedSymbolsRef = useRef([]);
+
+  const sendTickSubscription = useCallback(
+    (symbols) => {
+      if (!Array.isArray(symbols)) {
+        return;
+      }
+
+      const normalizedSymbols = [];
+
+      for (const symbol of symbols) {
+        if (typeof symbol !== "string") {
+          continue;
+        }
+
+        const value = symbol.trim().toUpperCase();
+
+        if (
+          value &&
+          !normalizedSymbols.includes(value)
+        ) {
+          normalizedSymbols.push(value);
+        }
+      }
+
+      requestedSymbolsRef.current =
+        normalizedSymbols;
+
+      const websocket =
+        websocketRef.current;
+
+      if (
+        !websocket ||
+        websocket.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+
+      websocket.send(
+        JSON.stringify({
+          type: "subscribe_ticks",
+          symbols: normalizedSymbols,
+        }),
+      );
+    },
+    [],
+  );
+
+  const subscribeTicks = useCallback(
+    (symbols) => {
+      sendTickSubscription(symbols);
+    },
+    [sendTickSubscription],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -172,6 +228,18 @@ export function MT5WebSocketProvider({
         reconnectAttemptRef.current = 0;
         setStatus("connected");
         setError(null);
+
+        const requestedSymbols =
+          requestedSymbolsRef.current;
+
+        if (requestedSymbols.length) {
+          websocket.send(
+            JSON.stringify({
+              type: "subscribe_ticks",
+              symbols: requestedSymbols,
+            }),
+          );
+        }
       };
 
       websocket.onmessage = (event) => {
@@ -197,8 +265,26 @@ export function MT5WebSocketProvider({
             message?.type ===
             "mt5_tick"
           ) {
-            setSnapshot((current) => {
+            const tick =
+              message?.data;
 
+            if (
+              !tick ||
+              typeof tick !== "object"
+            ) {
+              return;
+            }
+
+            const brokerSymbol =
+              typeof tick.symbol === "string"
+                ? tick.symbol.trim().toUpperCase()
+                : "";
+
+            if (!brokerSymbol) {
+              return;
+            }
+
+            setSnapshot((current) => {
               if (!current) {
                 return current;
               }
@@ -207,11 +293,18 @@ export function MT5WebSocketProvider({
                 ...current,
                 ticks: {
                   ...(current.ticks || {}),
-                  ...(message.data || {}),
+                  [brokerSymbol]: tick,
                 },
               };
             });
 
+            return;
+          }
+
+          if (
+            message?.type ===
+            "mt5_tick_subscription"
+          ) {
             return;
           }
 
@@ -324,6 +417,7 @@ export function MT5WebSocketProvider({
       mt5AccountId,
       userId,
       error,
+      subscribeTicks,
     }),
     [
       status,
@@ -338,6 +432,7 @@ export function MT5WebSocketProvider({
       mt5AccountId,
       userId,
       error,
+      subscribeTicks,
     ],
   );
 
@@ -363,5 +458,4 @@ export function useMT5WebSocket() {
 
   return context;
 }
-
 
