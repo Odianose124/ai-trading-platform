@@ -11,6 +11,7 @@ class MT5WorkerProcessError(RuntimeError):
 def _worker_process_entry(
     runtime: MT5AccountRuntime,
     connection: Connection,
+    event_connection: Connection,
     password: str,
 ) -> None:
     """
@@ -31,6 +32,9 @@ def _worker_process_entry(
         )
         while True:
             try:
+                if not connection.poll(0.05):
+                    continue
+
                 command = connection.recv()
             except EOFError:
                 break
@@ -665,6 +669,7 @@ class MT5WorkerProcess:
         self._password = password
         self._process: multiprocessing.Process | None = None
         self._connection: Connection | None = None
+        self._event_connection: Connection | None = None
         self._lock = RLock()
     @property
     def process(self) -> multiprocessing.Process | None:
@@ -677,11 +682,15 @@ class MT5WorkerProcess:
             parent_connection, child_connection = (
                 multiprocessing.Pipe()
             )
+            parent_event_connection, child_event_connection = (
+                multiprocessing.Pipe(False)
+            )
             process = multiprocessing.Process(
                 target=_worker_process_entry,
                 args=(
                     self.runtime,
                     child_connection,
+                    child_event_connection,
                     self._password,
                 ),
                 name=(
@@ -692,8 +701,10 @@ class MT5WorkerProcess:
             )
             process.start()
             child_connection.close()
+            child_event_connection.close()
             self._process = process
             self._connection = parent_connection
+            self._event_connection = parent_event_connection
             try:
                 response = self._receive_response()
             except Exception:
@@ -1655,8 +1666,10 @@ class MT5WorkerProcess:
                 process.terminate()
                 process.join(timeout=5)
             self._close_connection()
+            self._close_event_connection()
             self._process = None
             self._connection = None
+            self._event_connection = None
     def is_running(self) -> bool:
         process = self._process
         return (
@@ -1722,8 +1735,10 @@ class MT5WorkerProcess:
                 process.terminate()
             process.join(timeout=5)
         self._close_connection()
+        self._close_event_connection()
         self._process = None
         self._connection = None
+        self._event_connection = None
     def _close_connection(self) -> None:
         connection = self._connection
         if connection is None:
@@ -1732,6 +1747,16 @@ class MT5WorkerProcess:
             connection.close()
         except OSError:
             pass
+
+    def _close_event_connection(self) -> None:
+        connection = self._event_connection
+        if connection is None:
+            return
+        try:
+            connection.close()
+        except OSError:
+            pass
+
 def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:

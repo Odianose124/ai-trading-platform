@@ -1459,6 +1459,242 @@ class MT5AccountWorker:
             "requested_symbol": requested_symbol,
             "broker_symbol": candidates[0],
         }
+
+    def realtime_ticks_since(
+        self,
+        broker_symbol: str,
+        since_time_msc: int | None,
+    ) -> list[dict[str, Any]]:
+        """
+        Read newly available real MT5 terminal ticks for one already
+        resolved broker symbol.
+
+        The MT5 terminal remains owned by this account's dedicated
+        worker process. This method does not create another MT5
+        connection and does not generate application-side prices.
+
+        The caller supplies the last processed terminal timestamp in
+        milliseconds. Returned ticks are actual MT5 terminal ticks.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        if not isinstance(broker_symbol, str):
+            raise MT5WorkerError(
+                "The broker symbol must be a string."
+            )
+
+        broker_symbol = broker_symbol.strip()
+
+        if not broker_symbol:
+            raise MT5WorkerError(
+                "The broker symbol cannot be empty."
+            )
+
+        if not self.mt5.symbol_select(
+            broker_symbol,
+            True,
+        ):
+            raise MT5WorkerError(
+                "Unable to select MT5 broker symbol "
+                f"{broker_symbol}: {self.mt5.last_error()}"
+            )
+
+        try:
+            if since_time_msc is None:
+                from_time = datetime.now(
+                    timezone.utc
+                )
+            else:
+                from_time = datetime.fromtimestamp(
+                    max(
+                        0,
+                        int(since_time_msc),
+                    ) / 1000.0,
+                    tz=timezone.utc,
+                )
+
+            ticks = self.mt5.copy_ticks_from(
+                broker_symbol,
+                from_time,
+                self.mt5.COPY_TICKS_ALL,
+                1000,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unable to read realtime MT5 ticks | "
+                "mt5_account_id=%s | symbol=%s | error=%s",
+                self.runtime.mt5_account_id,
+                broker_symbol,
+                exc,
+            )
+            return []
+
+        if ticks is None:
+            return []
+
+        results: list[dict[str, Any]] = []
+
+        for tick in ticks:
+            bid = getattr(
+                tick,
+                "bid",
+                None,
+            )
+            ask = getattr(
+                tick,
+                "ask",
+                None,
+            )
+            last = getattr(
+                tick,
+                "last",
+                None,
+            )
+
+            if (
+                bid is None
+                and ask is None
+                and last is None
+            ):
+                continue
+
+            results.append(
+                {
+                    "symbol": broker_symbol,
+                    "bid": bid,
+                    "ask": ask,
+                    "last": last,
+                    "time": getattr(
+                        tick,
+                        "time",
+                        None,
+                    ),
+                    "time_msc": getattr(
+                        tick,
+                        "time_msc",
+                        None,
+                    ),
+                    "flags": getattr(
+                        tick,
+                        "flags",
+                        None,
+                    ),
+                    "volume": getattr(
+                        tick,
+                        "volume",
+                        None,
+                    ),
+                    "volume_real": getattr(
+                        tick,
+                        "volume_real",
+                        None,
+                    ),
+                }
+            )
+
+        return results
+    def realtime_tick(
+        self,
+        symbol: str,
+    ) -> dict[str, Any] | None:
+        """
+        Read the latest real tick for one broker symbol directly
+        from this account's isolated MT5 terminal.
+
+        This method does not create another MT5 connection and does
+        not use simulated or application-generated prices.
+        """
+
+        if not self.status().connected:
+            raise MT5WorkerError(
+                "The MT5 account worker is not connected."
+            )
+
+        broker_symbol = self.resolve_symbol(symbol)[
+            "broker_symbol"
+        ]
+
+        try:
+            tick = mt5.symbol_info_tick(
+                broker_symbol
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unable to read realtime MT5 tick | "
+                "mt5_account_id=%s | symbol=%s | error=%s",
+                self.runtime.mt5_account_id,
+                broker_symbol,
+                exc,
+            )
+            return None
+
+        if tick is None:
+            return None
+
+        bid = getattr(
+            tick,
+            "bid",
+            None,
+        )
+        ask = getattr(
+            tick,
+            "ask",
+            None,
+        )
+        last = getattr(
+            tick,
+            "last",
+            None,
+        )
+        tick_time = getattr(
+            tick,
+            "time",
+            None,
+        )
+        tick_time_msc = getattr(
+            tick,
+            "time_msc",
+            None,
+        )
+        flags = getattr(
+            tick,
+            "flags",
+            None,
+        )
+        volume = getattr(
+            tick,
+            "volume",
+            None,
+        )
+        volume_real = getattr(
+            tick,
+            "volume_real",
+            None,
+        )
+
+        if (
+            bid is None
+            and ask is None
+            and last is None
+        ):
+            return None
+
+        return {
+            "symbol": broker_symbol,
+            "bid": bid,
+            "ask": ask,
+            "last": last,
+            "time": tick_time,
+            "time_msc": tick_time_msc,
+            "flags": flags,
+            "volume": volume,
+            "volume_real": volume_real,
+        }
+
     def market_watch_ticks(
         self,
     ) -> dict[str, dict[str, Any]]:
@@ -2195,6 +2431,8 @@ class MT5AccountWorker:
             ),
             "last_error": mt5.last_error(),
         }
+
+
 
 
 
