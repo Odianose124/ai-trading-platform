@@ -1,5 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+import logging
 import multiprocessing
+import time
 from datetime import datetime
 from multiprocessing.connection import Connection
 from threading import RLock
@@ -8,6 +10,131 @@ from app.mt5.runtime import MT5AccountRuntime
 from app.mt5.worker import MT5AccountWorker
 class MT5WorkerProcessError(RuntimeError):
     """Raised when an MT5 worker process cannot be controlled safely."""
+
+
+def _tick_signature(
+    tick: dict[str, Any],
+) -> tuple[Any, ...]:
+    return (
+        tick.get("time_msc"),
+        tick.get("bid"),
+        tick.get("ask"),
+        tick.get("last"),
+        tick.get("flags"),
+        tick.get("volume"),
+        tick.get("volume_real"),
+    )
+
+
+def _publish_realtime_ticks(
+    worker: MT5AccountWorker,
+    event_connection: Connection,
+    subscriptions: dict[str, str],
+    last_tick_times: dict[str, int],
+    seen_signatures: dict[str, set[tuple[Any, ...]]],
+) -> None:
+    """
+    Read newly available real MT5 terminal ticks for the currently
+    subscribed broker symbols and publish them through the dedicated
+    child-to-parent event pipe.
+
+    All MetaTrader 5 calls remain inside the existing dedicated worker
+    process. No additional MT5 connection or worker thread is created.
+    """
+
+    if not subscriptions:
+        return
+
+    for broker_symbol in tuple(subscriptions.values()):
+        since_time_msc = last_tick_times.get(
+            broker_symbol
+        )
+
+        try:
+            ticks = worker.realtime_ticks_since(
+                broker_symbol=broker_symbol,
+                since_time_msc=since_time_msc,
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Unable to publish realtime MT5 ticks | "
+                "mt5_account_id=%s | symbol=%s | error=%s",
+                worker.runtime.mt5_account_id,
+                broker_symbol,
+                exc,
+            )
+            continue
+
+        if not ticks:
+            continue
+
+        current_time_msc = last_tick_times.get(
+            broker_symbol
+        )
+
+        signatures = seen_signatures.setdefault(
+            broker_symbol,
+            set(),
+        )
+
+        for tick in ticks:
+            time_msc_raw = tick.get("time_msc")
+
+            try:
+                time_msc = int(time_msc_raw)
+            except (TypeError, ValueError):
+                continue
+
+            if (
+                current_time_msc is not None
+                and time_msc < current_time_msc
+            ):
+                continue
+
+            signature = _tick_signature(tick)
+
+            if (
+                current_time_msc is not None
+                and time_msc == current_time_msc
+                and signature in signatures
+            ):
+                continue
+
+            if (
+                current_time_msc is None
+                or time_msc > current_time_msc
+            ):
+                signatures.clear()
+                current_time_msc = time_msc
+
+            signatures.add(signature)
+            last_tick_times[broker_symbol] = current_time_msc
+
+            try:
+                event_connection.send(
+                    {
+                        "type": "mt5_tick",
+                        "mt5_account_id": (
+                            worker.runtime.mt5_account_id
+                        ),
+                        "user_id": worker.runtime.user_id,
+                        "data": tick,
+                    }
+                )
+            except (
+                BrokenPipeError,
+                EOFError,
+                OSError,
+            ):
+                logging.getLogger(__name__).warning(
+                    "MT5 realtime event connection closed | "
+                    "mt5_account_id=%s",
+                    worker.runtime.mt5_account_id,
+                )
+                subscriptions.clear()
+                last_tick_times.clear()
+                seen_signatures.clear()
+                return
 def _worker_process_entry(
     runtime: MT5AccountRuntime,
     connection: Connection,
@@ -30,9 +157,32 @@ def _worker_process_entry(
                 "status": worker.status(),
             }
         )
+        tick_subscriptions: dict[str, str] = {}
+        last_tick_times: dict[str, int] = {}
+        seen_signatures: dict[str, set[tuple[Any, ...]]] = {}
+        next_tick_poll = time.monotonic()
+
         while True:
             try:
-                if not connection.poll(0.05):
+                if not connection.poll(0.01):
+                    now = time.monotonic()
+
+                    if (
+                        tick_subscriptions
+                        and now >= next_tick_poll
+                    ):
+                        _publish_realtime_ticks(
+                            worker=worker,
+                            event_connection=event_connection,
+                            subscriptions=tick_subscriptions,
+                            last_tick_times=last_tick_times,
+                            seen_signatures=seen_signatures,
+                        )
+
+                        next_tick_poll = (
+                            time.monotonic() + 0.01
+                        )
+
                     continue
 
                 command = connection.recv()
@@ -47,6 +197,152 @@ def _worker_process_entry(
                 )
                 continue
             action = command.get("action")
+
+            if action == "subscribe_ticks":
+                symbols = command.get("symbols")
+
+                if not isinstance(symbols, list):
+                    connection.send(
+                        {
+                            "type": "error",
+                            "error": (
+                                "The realtime tick symbols "
+                                "must be a list."
+                            ),
+                        }
+                    )
+                    continue
+
+                normalized_symbols: list[str] = []
+
+                for symbol in symbols:
+                    if not isinstance(symbol, str):
+                        connection.send(
+                            {
+                                "type": "error",
+                                "error": (
+                                    "Every realtime tick symbol "
+                                    "must be a string."
+                                ),
+                            }
+                        )
+                        break
+
+                    normalized = symbol.strip().upper()
+
+                    if not normalized:
+                        continue
+
+                    if normalized not in normalized_symbols:
+                        normalized_symbols.append(
+                            normalized
+                        )
+                else:
+                    resolved_subscriptions: dict[str, str] = {}
+
+                    try:
+                        for requested_symbol in normalized_symbols:
+                            resolved = worker.resolve_symbol(
+                                requested_symbol
+                            )
+
+                            broker_symbol = resolved.get(
+                                "broker_symbol"
+                            )
+
+                            if not isinstance(
+                                broker_symbol,
+                                str,
+                            ):
+                                raise MT5WorkerProcessError(
+                                    "MT5 symbol resolution returned "
+                                    "an invalid broker symbol."
+                                )
+
+                            resolved_subscriptions[
+                                requested_symbol
+                            ] = broker_symbol
+
+                        tick_subscriptions = (
+                            resolved_subscriptions
+                        )
+
+                        last_tick_times.clear()
+                        seen_signatures.clear()
+
+                        for broker_symbol in set(
+                            tick_subscriptions.values()
+                        ):
+                            tick = worker.realtime_tick(
+                                broker_symbol
+                            )
+
+                            if tick is None:
+                                continue
+
+                            time_msc_raw = tick.get(
+                                "time_msc"
+                            )
+
+                            try:
+                                time_msc = int(
+                                    time_msc_raw
+                                )
+                            except (
+                                TypeError,
+                                ValueError,
+                            ):
+                                continue
+
+                            signature = _tick_signature(
+                                tick
+                            )
+
+                            last_tick_times[
+                                broker_symbol
+                            ] = time_msc
+
+                            seen_signatures[
+                                broker_symbol
+                            ] = {signature}
+
+                            event_connection.send(
+                                {
+                                    "type": "mt5_tick",
+                                    "mt5_account_id": (
+                                        worker.runtime.mt5_account_id
+                                    ),
+                                    "user_id": (
+                                        worker.runtime.user_id
+                                    ),
+                                    "data": tick,
+                                }
+                            )
+
+                        next_tick_poll = (
+                            time.monotonic()
+                        )
+
+                        connection.send(
+                            {
+                                "type": (
+                                    "tick_subscription_result"
+                                ),
+                                "subscriptions": (
+                                    tick_subscriptions
+                                ),
+                            }
+                        )
+                    except Exception as exc:
+                        connection.send(
+                            {
+                                "type": "error",
+                                "error": str(exc),
+                            }
+                        )
+
+                continue
+
             if action == "status":
                 connection.send(
                     {
@@ -1630,6 +1926,137 @@ class MT5WorkerProcess:
                     "MT5 worker returned an invalid order result."
                 )
             return result
+    def subscribe_ticks(
+        self,
+        symbols: list[str],
+    ) -> dict[str, str]:
+        """
+        Subscribe this account-scoped MT5 worker to real terminal
+        ticks for the requested application symbols.
+
+        The worker resolves each requested symbol against the actual
+        broker symbols available to this MT5 account.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise MT5WorkerProcessError(
+                    "MT5 worker process is not running."
+                )
+
+            if not isinstance(symbols, list):
+                raise MT5WorkerProcessError(
+                    "Realtime tick symbols must be a list."
+                )
+
+            normalized_symbols: list[str] = []
+
+            for symbol in symbols:
+                if not isinstance(symbol, str):
+                    raise MT5WorkerProcessError(
+                        "Every realtime tick symbol must be a string."
+                    )
+
+                normalized = symbol.strip().upper()
+
+                if not normalized:
+                    continue
+
+                if normalized not in normalized_symbols:
+                    normalized_symbols.append(
+                        normalized
+                    )
+
+            self._send_command(
+                {
+                    "action": "subscribe_ticks",
+                    "symbols": normalized_symbols,
+                }
+            )
+
+            response = self._receive_response()
+
+            if response.get("type") == "error":
+                raise MT5WorkerProcessError(
+                    response.get(
+                        "error",
+                        "MT5 realtime tick subscription failed.",
+                    )
+                )
+
+            if response.get(
+                "type"
+            ) != "tick_subscription_result":
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an unexpected "
+                    "tick subscription response."
+                )
+
+            subscriptions = response.get(
+                "subscriptions"
+            )
+
+            if not isinstance(
+                subscriptions,
+                dict,
+            ):
+                raise MT5WorkerProcessError(
+                    "MT5 worker returned an invalid "
+                    "tick subscription payload."
+                )
+
+            return {
+                str(requested): str(broker)
+                for requested, broker in subscriptions.items()
+            }
+
+    def drain_events(
+        self,
+        max_events: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """
+        Drain already-published worker events without blocking.
+
+        The event pipe is separate from the command/response pipe so
+        realtime ticks cannot be mistaken for normal worker responses.
+        """
+        with self._lock:
+            connection = self._event_connection
+
+            if connection is None:
+                return []
+
+            try:
+                limit = int(max_events)
+            except (TypeError, ValueError) as exc:
+                raise MT5WorkerProcessError(
+                    "The realtime event limit must be an integer."
+                ) from exc
+
+            if limit <= 0:
+                return []
+
+            events: list[dict[str, Any]] = []
+
+            try:
+                while len(events) < limit:
+                    if not connection.poll(0):
+                        break
+
+                    event = connection.recv()
+
+                    if not isinstance(event, dict):
+                        continue
+
+                    events.append(event)
+
+            except (
+                EOFError,
+                OSError,
+            ):
+                return events
+
+            return events
+
     def stop(self) -> None:
         with self._lock:
             process = self._process
@@ -1761,6 +2188,7 @@ def create_worker_process(
     runtime: MT5AccountRuntime,
 ) -> MT5WorkerProcess:
     return MT5WorkerProcess(runtime)
+
 
 
 
