@@ -70,6 +70,47 @@ class MT5WorkerManager:
             self._workers[account.id] = worker
             mt5_runtime_manager.mark_running(account.id)
             return status
+    def subscribe_ticks(
+        self,
+        mt5_account_id: int,
+        user_id: int,
+        symbols: list[str],
+    ) -> dict[str, str]:
+        """
+        Subscribe one user's isolated MT5 worker to the requested
+        terminal symbols.
+
+        Symbol resolution happens inside the dedicated MT5 worker.
+        """
+        with self._lock:
+            try:
+                mt5_runtime_manager.get_runtime_for_user(
+                    mt5_account_id,
+                    user_id,
+                )
+            except MT5RuntimeManagerError as exc:
+                raise MT5WorkerManagerError(
+                    str(exc)
+                ) from exc
+
+            worker = self._workers.get(mt5_account_id)
+
+            if worker is None or not worker.is_running():
+                mt5_runtime_manager.mark_stopped(
+                    mt5_account_id
+                )
+                raise MT5WorkerManagerError(
+                    f"MT5 worker for account "
+                    f"{mt5_account_id} is not running."
+                )
+
+            try:
+                return worker.subscribe_ticks(symbols)
+            except MT5WorkerProcessError as exc:
+                raise MT5WorkerManagerError(
+                    f"Unable to subscribe to realtime MT5 ticks "
+                    f"for account {mt5_account_id}: {exc}"
+                ) from exc
     def drain_worker_events(
         self,
         mt5_account_id: int,
@@ -623,6 +664,34 @@ class MT5WorkerManager:
             user_id,
         )
         return bool(status.get("running"))
+    def drain_all_worker_events(
+        self,
+        max_events_per_account: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """
+        Drain already-produced realtime events from every registered
+        account worker.
+
+        The MT5 calls themselves remain inside the dedicated worker
+        processes. This method only drains their event pipes.
+        """
+        with self._lock:
+            events: list[dict[str, Any]] = []
+
+            for worker in self._workers.values():
+                if not worker.is_running():
+                    continue
+
+                try:
+                    events.extend(
+                        worker.drain_events(
+                            max_events=max_events_per_account,
+                        )
+                    )
+                except MT5WorkerProcessError:
+                    continue
+
+            return events
     def registered_accounts(self) -> list[int]:
         with self._lock:
             return list(self._workers.keys())

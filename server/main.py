@@ -1,4 +1,4 @@
-﻿from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
 import asyncio
 from datetime import datetime, timezone
 
@@ -264,7 +264,52 @@ MARKET_SYMBOLS = [
 
 mt5_realtime_publisher_task = None
 mt5_stream_task = None
+mt5_worker_event_publisher_task = None
 
+
+async def mt5_worker_event_publisher():
+    """
+    Drain realtime events already produced by account-isolated MT5
+    workers and forward them through the existing MT5 stream service.
+
+    This loop never calls MetaTrader 5 directly.
+    """
+
+    while True:
+        try:
+            events = await asyncio.to_thread(
+                mt5_worker_manager.drain_all_worker_events,
+                1000,
+            )
+
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+
+                if event.get("type") != "mt5_tick":
+                    continue
+
+                user_id = event.get("user_id")
+                tick = event.get("data")
+
+                if not isinstance(user_id, int):
+                    continue
+
+                if not isinstance(tick, dict):
+                    continue
+
+                await mt5_stream_service.publish_tick(
+                    user_id=user_id,
+                    tick=tick,
+                )
+
+        except asyncio.CancelledError:
+            raise
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.01)
 
 async def mt5_realtime_publisher():
 
@@ -322,15 +367,18 @@ async def lifespan(app: FastAPI):
     global mt5_realtime_publisher_task
 
     global mt5_stream_task
+    global mt5_worker_event_publisher_task
 
     mt5_stream_task = asyncio.create_task(
         mt5_stream_service.start()
     )
 
-    mt5_realtime_publisher_task
-
     mt5_realtime_publisher_task = asyncio.create_task(
         mt5_realtime_publisher()
+    )
+
+    mt5_worker_event_publisher_task = asyncio.create_task(
+        mt5_worker_event_publisher()
     )
 
 
@@ -350,6 +398,15 @@ async def lifespan(app: FastAPI):
     try:
         if mt5_realtime_publisher_task:
             await mt5_realtime_publisher_task
+    except asyncio.CancelledError:
+        pass
+
+    if mt5_worker_event_publisher_task:
+        mt5_worker_event_publisher_task.cancel()
+
+    try:
+        if mt5_worker_event_publisher_task:
+            await mt5_worker_event_publisher_task
     except asyncio.CancelledError:
         pass
 
@@ -377,6 +434,7 @@ async def mt5_realtime_websocket(
 ):
     db: Session | None = None
     user_id: int | None = None
+    account: MT5TradingAccount | None = None
 
     try:
         if not token:
@@ -470,18 +528,103 @@ async def mt5_realtime_websocket(
             user_id=user_id,
         )
 
+
         while True:
-            await asyncio.sleep(3600)
+            message = await websocket.receive_json()
+
+            if not isinstance(message, dict):
+                continue
+
+            message_type = message.get("type")
+
+            if message_type != "subscribe_ticks":
+                continue
+
+            symbols = message.get("symbols")
+
+            if not isinstance(symbols, list):
+                await websocket.send_json(
+                    {
+                        "type": "mt5_error",
+                        "detail": (
+                            "Realtime tick symbols must be "
+                            "provided as a list."
+                        ),
+                    }
+                )
+                continue
+
+            normalized_symbols: list[str] = []
+
+            for symbol in symbols:
+                if not isinstance(symbol, str):
+                    continue
+
+                normalized = symbol.strip().upper()
+
+                if (
+                    normalized
+                    and normalized not in normalized_symbols
+                ):
+                    normalized_symbols.append(normalized)
+
+            subscription_symbols = (
+                await websocket_manager.set_subscription(
+                    websocket=websocket,
+                    user_id=user_id,
+                    symbols=normalized_symbols,
+                )
+            )
+
+            try:
+                resolved = (
+                    mt5_worker_manager.subscribe_ticks(
+                        mt5_account_id=account.id,
+                        user_id=user_id,
+                        symbols=sorted(
+                            subscription_symbols
+                        ),
+                    )
+                )
+
+                await websocket.send_json(
+                    {
+                        "type": "mt5_tick_subscription",
+                        "subscriptions": resolved,
+                    }
+                )
+
+            except MT5WorkerManagerError as exc:
+                await websocket.send_json(
+                    {
+                        "type": "mt5_error",
+                        "detail": str(exc),
+                    }
+                )
 
     except WebSocketDisconnect:
         pass
 
     finally:
         if user_id is not None:
-            await websocket_manager.disconnect(
-                websocket=websocket,
-                user_id=user_id,
+            remaining_symbols = (
+                await websocket_manager.disconnect(
+                    websocket=websocket,
+                    user_id=user_id,
+                )
             )
+
+            if account is not None:
+                try:
+                    mt5_worker_manager.subscribe_ticks(
+                        mt5_account_id=account.id,
+                        user_id=user_id,
+                        symbols=sorted(
+                            remaining_symbols
+                        ),
+                    )
+                except Exception:
+                    pass
 
         if db is not None:
             db.close()
@@ -629,15 +772,3 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }
-
-
-
-
-
-
-
-
-
-
-
-
